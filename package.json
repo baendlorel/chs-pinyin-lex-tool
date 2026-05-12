@@ -1,0 +1,19 @@
+{
+  "type": "module",
+  "devDependencies": {
+    "oxlint": "^1.64.0",
+    "prettier": "^3.8.3",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.12",
+    "vitest": "^4.1.6"
+  },
+  "dependencies": {
+    "@ktjs/mui": "^0.40.20",
+    "@ktjs/mui-icon": "^0.40.1",
+    "@ktjs/ts-plugin": "^0.3.7",
+    "@ktjs/vite-plugin-ktjsx": "^0.5.4",
+    "fastify": "^5.8.5",
+    "kt.js": "^0.40.20"
+  }
+}
