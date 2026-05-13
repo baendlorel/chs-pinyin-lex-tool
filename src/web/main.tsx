@@ -52,26 +52,19 @@ interface RawParseResult {
 }
 
 const lexPath = ref('');
+const lexPathDraft = ref('');
+const lexPathDialogOpen = ref(false);
 const selectedFileName = ref('');
 const loadedFilePath = ref('');
 const entries = ref<LexEntry[]>([]);
 const backups = ref<LexBackupInfo[]>([]);
-const lexFiles = ref<string[]>([]);
 const loading = ref(false);
 const saving = ref(false);
-const importDialogOpen = ref(false);
-const importText = ref('');
 const alertState = ref<AlertState | null>(null);
 const exportTime = ref<number | null>(null);
 const recordStart = ref<number | null>(null);
 const rawEditorText = ref('');
 const rawSourceEntries = ref<LexEntry[]>([]);
-const searchQuery = ref('');
-const searchCursor = ref(-1);
-const searchLine = ref<number | null>(null);
-const searchPerformed = ref(false);
-const lastSearchQuery = ref('');
-const rawEditorSurface = ref<HTMLDivElement>();
 
 const busy = computed(() => loading.value || saving.value, [loading, saving]);
 const hasActiveFile = computed(() => loadedFilePath.value !== '', [loadedFilePath]);
@@ -197,19 +190,6 @@ const rawValidation = computed(
 );
 const activeEntryCount = computed(() => rawValidation.value.entries.length, [rawValidation]);
 const entryLabel = computed(() => `${activeEntryCount.value} 条`, [activeEntryCount]);
-const searchStatusText = computed(() => {
-  const keyword = searchQuery.value.trim();
-
-  if (!keyword || !searchPerformed.value) {
-    return '';
-  }
-
-  if (searchLine.value === null) {
-    return `未找到 ${keyword}`;
-  }
-
-  return `搜索 第 ${searchLine.value} 行`;
-}, [searchLine, searchPerformed, searchQuery]);
 const statusBarNoticeText = computed(() => {
   const current = alertState.value;
   if (current) {
@@ -280,18 +260,7 @@ function applyLoadedDocument(document: LoadedLexFile) {
   backups.value = document.backups;
   rawSourceEntries.value = document.entries.map((entry) => ({ ...entry }));
   rawEditorText.value = serializeEntriesToRaw(document.entries);
-  searchQuery.value = '';
-  searchCursor.value = -1;
-  searchLine.value = null;
-  searchPerformed.value = false;
-  lastSearchQuery.value = '';
   persistLastOpenPath(document.filePath);
-
-  if (!lexFiles.value.includes(document.fileName)) {
-    lexFiles.value = [...lexFiles.value, document.fileName].sort((left, right) =>
-      left.localeCompare(right, 'zh-Hans-CN'),
-    );
-  }
 }
 
 async function loadCurrentFile(fileName = selectedFileName.value, manageLoading = true) {
@@ -335,7 +304,6 @@ async function scanDirectory() {
     lexPath.value = result.selectedFileName
       ? `${result.directoryPath}/${result.selectedFileName}`
       : result.directoryPath;
-    lexFiles.value = result.files;
     selectedFileName.value = result.selectedFileName ?? '';
 
     if (!result.selectedFileName) {
@@ -343,6 +311,7 @@ async function scanDirectory() {
       loadedFilePath.value = '';
       entries.value = [];
       backups.value = [];
+      selectedFileName.value = '';
       exportTime.value = null;
       recordStart.value = null;
       rawEditorText.value = '';
@@ -413,44 +382,6 @@ async function restoreBackup(backupIndex: number) {
   }
 }
 
-async function importCurrentText() {
-  if (!selectedFileName.value) {
-    showAlert('warning', '请先加载一个 .lex 文件。');
-    return;
-  }
-
-  saving.value = true;
-
-  try {
-    const document = await requestJson<LoadedLexFile>('/api/lex/import', {
-      directoryPath: lexPath.value,
-      fileName: selectedFileName.value,
-      content: importText.value,
-    });
-    applyLoadedDocument(document);
-    importDialogOpen.value = false;
-    showAlert('success', '导入完成，新增内容已经合并到当前词库。');
-  } catch (error) {
-    showAlert('error', extractErrorMessage(error));
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function handleImportFileChange(event: Event) {
-  const target = event.currentTarget as HTMLInputElement | null;
-  const file = target?.files?.[0];
-  if (!file) {
-    return;
-  }
-
-  importText.value = await file.text();
-  importDialogOpen.value = true;
-  if (target) {
-    target.value = '';
-  }
-}
-
 let autoScanInitialized = false;
 
 function restoreLastOpenPathAndScan() {
@@ -467,76 +398,25 @@ function restoreLastOpenPathAndScan() {
   void scanDirectory();
 }
 
-function getRawEditorTextarea() {
-  return rawEditorSurface.value?.querySelector('textarea') ?? null;
+function openLexPathDialog() {
+  lexPathDraft.value = lexPath.value;
+  lexPathDialogOpen.value = true;
 }
 
-function locateSearchMatch(resetFromStart = false, queryOverride?: string) {
-  const keyword = (queryOverride ?? searchQuery.value).trim();
-
-  if (!keyword) {
-    searchCursor.value = -1;
-    searchLine.value = null;
-    searchPerformed.value = false;
-    lastSearchQuery.value = '';
-    return;
-  }
-
-  const content = rawEditorText.value;
-  const shouldReset = resetFromStart || lastSearchQuery.value !== keyword || searchCursor.value < 0;
-  let matchIndex = content.indexOf(keyword, shouldReset ? 0 : searchCursor.value + 1);
-
-  if (matchIndex === -1 && !shouldReset) {
-    matchIndex = content.indexOf(keyword, 0);
-  }
-
-  searchPerformed.value = true;
-  lastSearchQuery.value = keyword;
-
-  if (matchIndex === -1) {
-    searchCursor.value = -1;
-    searchLine.value = null;
-    return;
-  }
-
-  searchCursor.value = matchIndex;
-  searchLine.value = content.slice(0, matchIndex).split(/\r?\n/u).length;
-
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  window.requestAnimationFrame(() => {
-    const target = getRawEditorTextarea();
-    if (!target) {
-      return;
-    }
-
-    const lineIndex = content.slice(0, matchIndex).split(/\r?\n/u).length - 1;
-    const lineHeight = Number.parseFloat(window.getComputedStyle(target).lineHeight) || 24;
-
-    target.focus();
-    target.setSelectionRange(matchIndex, matchIndex + keyword.length);
-    target.scrollTop = Math.max(lineIndex * lineHeight - target.clientHeight * 0.35, 0);
-  });
+function closeLexPathDialog() {
+  lexPathDialogOpen.value = false;
 }
 
-function handleSearchInput(value: string) {
-  searchQuery.value = value;
-
-  if (!value.trim()) {
-    searchCursor.value = -1;
-    searchLine.value = null;
-    searchPerformed.value = false;
-    lastSearchQuery.value = '';
+async function confirmLexPath() {
+  const nextPath = lexPathDraft.value.trim();
+  if (!nextPath) {
+    showAlert('warning', '请先输入 .lex 文件路径。');
     return;
   }
 
-  searchCursor.value = -1;
-  searchLine.value = null;
-  searchPerformed.value = false;
-  lastSearchQuery.value = '';
-  locateSearchMatch(true, value);
+  lexPath.value = nextPath;
+  closeLexPathDialog();
+  await scanDirectory();
 }
 
 if (typeof window !== 'undefined' && !autoScanInitialized) {
@@ -560,52 +440,43 @@ function App() {
         </div>
 
         <div class="ribbon-row">
-          <TextField
-            k-model={lexPath}
-            fullWidth
+          <Button
+            variant="contained"
+            color="primary"
             size="small"
-            placeholder="C:\Users\...\InputMethod\xxx.lex"
-          ></TextField>
+            disabled={busy}
+            startIcon={<FolderOpen />}
+            on:click={openLexPathDialog}
+            iconOnly
+          ></Button>
+          <Button
+            variant="contained"
+            color="primary"
+            size="small"
+            disabled={busy.map((value) => value || !hasActiveFile.value, [hasActiveFile])}
+            startIcon={<Save />}
+            on:click={saveEntries}
+            iconOnly
+          ></Button>
 
-          <div class="toolbar-actions">
-            <Button
-              variant="contained"
-              color="primary"
-              size="small"
-              disabled={busy}
-              startIcon={<FolderOpen />}
-              on:click={saveEntries}
-              iconOnly
-            ></Button>
-            <Button
-              variant="contained"
-              color="primary"
-              size="small"
-              disabled={busy.map((value) => value || !hasActiveFile.value, [hasActiveFile])}
-              startIcon={<Save />}
-              on:click={saveEntries}
-              iconOnly
-            ></Button>
+          <div style="flex:1"></div>
 
-            <div style="margin-left:10px"></div>
-
-            <KTFor
-              list={backups}
-              key={(backup) => backup.index}
-              map={(backup) => (
-                <Button
-                  variant="text"
-                  color="warning"
-                  size="small"
-                  disabled={busy.map((value) => value || !backup.exists, [busy, backups])}
-                  startIcon={<Restore />}
-                  on:click={() => void restoreBackup(backup.index)}
-                >
-                  bak{backup.index}
-                </Button>
-              )}
-            ></KTFor>
-          </div>
+          <KTFor
+            list={backups}
+            key={(backup) => backup.index}
+            map={(backup) => (
+              <Button
+                variant="text"
+                color="warning"
+                size="small"
+                disabled={busy.map((value) => value || !backup.exists, [busy, backups])}
+                startIcon={<Restore />}
+                on:click={() => void restoreBackup(backup.index)}
+              >
+                bak{backup.index}
+              </Button>
+            )}
+          ></KTFor>
         </div>
 
         <div class={progressClassName}>
@@ -614,9 +485,10 @@ function App() {
       </header>
 
       <section class="editor-frame">
-        <div k-if={hasActiveFile} class="editor-surface" ref={rawEditorSurface}>
+        <div k-if={hasActiveFile} class="editor-surface">
           <TextField
             k-model={rawEditorText}
+            class="raw-editor-field"
             multiline
             rows={30}
             fullWidth
@@ -630,10 +502,7 @@ function App() {
               <FolderOpen class="empty-icon-svg" />
             </div>
             <h3>先打开一个词库</h3>
-            <p>
-              在顶部输入 Windows 目录或某个 .lex
-              文件路径，点击“扫描”。成功打开后，路径会保存在本地，下次进入会自动恢复并重新扫描。
-            </p>
+            <p>点击顶部打开按钮，输入 .lex 文件路径。成功打开后，路径会保存在本地，下次进入会自动恢复并重新扫描。</p>
           </div>
         </div>
       </section>
@@ -651,9 +520,6 @@ function App() {
             {statusBarNoticeText}
           </span>
           <span class="status-bar-item">{entryLabel}</span>
-          <span k-if={searchStatusText} class="status-bar-item">
-            {searchStatusText}
-          </span>
         </div>
         <div class="status-bar-group status-bar-group-right">
           <span class="status-bar-item">导出 {exportTime.map((value) => formatTimestamp(value))}</span>
@@ -662,6 +528,40 @@ function App() {
           </span>
         </div>
       </footer>
+
+      <Dialog
+        k-model={lexPathDialogOpen}
+        title="打开 .lex 文件"
+        width="80%"
+        actions={
+          <div class="dialog-actions">
+            <Button variant="text" color="secondary" class="dialog-button" on:click={closeLexPathDialog}>
+              取消
+            </Button>
+            <Button
+              class="dialog-button dialog-button-primary"
+              variant="contained"
+              color="primary"
+              disabled={busy}
+              startIcon={<FolderOpen class="dialog-button-icon" />}
+              on:click={confirmLexPath}
+            >
+              打开
+            </Button>
+          </div>
+        }
+      >
+        <TextField
+          k-model={lexPathDraft}
+          fullWidth
+          size="small"
+          label=".lex 文件路径"
+          placeholder="C:\\Users\\...\\InputMethod\\xxx.lex"
+          on:change={(value) => {
+            lexPathDraft.value = String(value);
+          }}
+        ></TextField>
+      </Dialog>
     </main>
   );
 }

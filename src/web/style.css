@@ -104,57 +104,14 @@ body {
 }
 
 .ribbon-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px) minmax(200px, 280px) auto;
-  gap: 8px;
+  display: flex;
+  justify-content: flex-end;
   align-items: center;
-}
-
-.toolbar-field {
-  display: grid;
   gap: 8px;
 }
 
-.path-field {
-  flex: 1 1 480px;
-}
-
-.file-field {
-  flex: 0 1 240px;
-}
-
-.toolbar-label {
-  font-size: 0.76rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.toolbar-text-field,
-.toolbar-select-field,
-.toolbar-search-field,
 .raw-editor-field {
   width: 100%;
-}
-
-.toolbar-text-field,
-.toolbar-select-field,
-.toolbar-search {
-  min-width: 0;
-}
-
-.toolbar-text-field input {
-  color: var(--ink);
-}
-
-.toolbar-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.toolbar-search-field {
-  flex: 1 1 auto;
 }
 
 .raw-editor-field textarea {
@@ -165,23 +122,11 @@ body {
   white-space: pre;
 }
 
-.toolbar-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.toolbar-action-button {
-  flex: 0 0 auto;
-}
-
 .backup-button,
 .dialog-button {
   font: inherit;
 }
 
-.toolbar-action-button svg,
 .backup-button-icon,
 .dialog-button-icon,
 .empty-icon-svg {
@@ -240,7 +185,6 @@ body {
   padding: 0;
 }
 
-.import-helper,
 .empty-card p {
   margin: 10px 0 0;
   color: var(--muted);
@@ -357,18 +301,6 @@ body {
   background: rgba(255, 255, 255, 0.2);
 }
 
-@media (max-width: 1180px) {
-  .ribbon-row {
-    grid-template-columns: minmax(0, 1fr) minmax(180px, 1fr);
-  }
-
-  .toolbar-search,
-  .toolbar-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-  }
-}
-
 @media (max-width: 720px) {
   .app-shell {
     width: min(100vw - 12px, 1680px);
@@ -389,22 +321,7 @@ body {
   }
 
   .ribbon-row {
-    grid-template-columns: 1fr;
-  }
-
-  .toolbar-search,
-  .toolbar-actions {
-    grid-column: auto;
-    width: 100%;
-  }
-
-  .toolbar-search {
-    flex-wrap: wrap;
-  }
-
-  .toolbar-search-field,
-  .toolbar-action-button {
-    width: 100%;
+    justify-content: flex-start;
   }
 
   .raw-editor-field textarea {
