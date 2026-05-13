@@ -17,9 +17,6 @@ importers:
       '@ktjs/mui-icon':
         specifier: ^0.40.1
         version: 0.40.1(@ktjs/shared@0.40.1)
-      '@ktjs/ts-plugin':
-        specifier: ^0.3.7
-        version: 0.3.7(typescript@6.0.3)
       '@ktjs/vite-plugin-ktjsx':
         specifier: ^0.5.4
         version: 0.5.4(vite@8.0.12(@types/node@25.7.0)(esbuild@0.27.7)(tsx@4.21.0))
@@ -33,6 +30,9 @@ importers:
         specifier: ^0.40.24
         version: 0.40.24(@ktjs/shared@0.40.1)
     devDependencies:
+      '@ktjs/ts-plugin':
+        specifier: ^0.3.7
+        version: 0.3.7(typescript@6.0.3)
       concurrently:
         specifier: ^9.2.1
         version: 9.2.1

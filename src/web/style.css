@@ -39,26 +39,28 @@ body {
 }
 
 .app-shell {
-  width: min(1680px, calc(100vw - 24px));
-  margin: 0 auto;
-  padding: 10px 0 42px;
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
 }
 
 .ribbon-shell {
-  position: sticky;
-  top: 8px;
-  z-index: 5;
-  margin-bottom: 10px;
-  padding: 10px 12px 8px;
-  border: 1px solid rgba(215, 221, 232, 0.9);
-  border-radius: 14px;
-  background: var(--ribbon-bg);
-  backdrop-filter: blur(12px);
-  box-shadow: var(--shadow-ribbon);
+  position: static;
+  z-index: auto;
+  margin-bottom: 0;
+  padding: 14px 20px 10px;
+  border: 0;
+  border-bottom: 1px solid rgba(215, 221, 232, 0.9);
+  border-radius: 0;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
 }
 
 .ribbon-topline {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -108,18 +110,29 @@ body {
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
+  min-height: 36px;
 }
 
 .raw-editor-field {
+  flex: 1;
+  margin: 0;
+  padding: 0;
   width: 100%;
 }
-
 .raw-editor-field textarea {
-  min-height: calc(100vh - 146px);
+  padding: 0 40px;
+  border: 0;
+  background: transparent;
   color: var(--ink);
   font: 400 0.98rem/1.72 var(--font-mono);
-  resize: vertical;
+  resize: none;
   white-space: pre;
+  height: 100%;
+}
+
+.raw-editor-field textarea:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 .backup-button,
@@ -171,18 +184,15 @@ body {
 }
 
 .editor-frame {
-  min-height: calc(100vh - 122px);
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
   padding: 0;
 }
 
-.editor-surface,
 .empty-card {
   width: 100%;
   margin: 0 auto;
-}
-
-.editor-surface {
-  padding: 0;
 }
 
 .empty-card p {
@@ -232,26 +242,12 @@ body {
   border-radius: 12px;
 }
 
-.progress-wrap {
-  margin-top: 6px;
-  transition: opacity 180ms ease;
-}
-
-.progress-wrap.is-hidden {
-  opacity: 0;
-}
-
 .status-bar {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 20;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 24px;
+  height: 24px;
   padding: 0 8px;
   background: #007acc;
   color: #ffffff;
@@ -303,13 +299,11 @@ body {
 
 @media (max-width: 720px) {
   .app-shell {
-    width: min(100vw - 12px, 1680px);
-    padding-top: 8px;
+    padding-top: 0;
   }
 
   .ribbon-shell {
-    position: static;
-    padding: 10px;
+    padding: 12px 10px 8px;
   }
 
   .ribbon-topline {
@@ -322,10 +316,6 @@ body {
 
   .ribbon-row {
     justify-content: flex-start;
-  }
-
-  .raw-editor-field textarea {
-    min-height: calc(100vh - 250px);
   }
 
   .status-bar {

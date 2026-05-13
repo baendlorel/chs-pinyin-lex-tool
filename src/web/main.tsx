@@ -67,8 +67,6 @@ const rawSourceEntries = ref<LexEntry[]>([]);
 
 const busy = computed(() => loading.value || saving.value, [loading, saving]);
 const hasActiveFile = computed(() => loadedFilePath.value !== '', [loadedFilePath]);
-const hasNoActiveFile = loadedFilePath.is('');
-const progressClassName = computed(() => `progress-wrap ${busy.value ? '' : 'is-hidden'}`, [busy]);
 const activeFileName = computed(() => {
   const currentPath = loadedFilePath.value.trim();
   if (!currentPath) {
@@ -197,7 +195,7 @@ const rawValidation = computed(
   [rawEditorText, rawSourceEntries],
 );
 const activeEntryCount = computed(() => rawValidation.value.entries.length, [rawValidation]);
-const entryLabel = computed(() => `${activeEntryCount.value} 条`, [activeEntryCount]);
+const entryLabel = computed(() => `${activeEntryCount.value} 词条`, [activeEntryCount]);
 const statusBarNoticeText = computed(() => {
   const current = alertState.value;
   if (current) {
@@ -258,16 +256,16 @@ async function requestJson<T>(input: string, body?: unknown) {
   return (data ?? {}) as T;
 }
 
-function applyLoadedDocument(document: LoadedLexFile) {
-  lexPath.value = document.filePath;
-  loadedFilePath.value = document.filePath;
-  exportTime.value = document.exportTime;
-  recordStart.value = document.recordStart;
-  entries.value = document.entries;
-  backups.value = document.backups;
-  rawSourceEntries.value = document.entries.map((entry) => ({ ...entry }));
-  rawEditorText.value = serializeEntriesToRaw(document.entries);
-  persistLastOpenPath(document.filePath);
+function applyLoadedDocument(doc: LoadedLexFile) {
+  lexPath.value = doc.filePath;
+  loadedFilePath.value = doc.filePath;
+  exportTime.value = doc.exportTime;
+  recordStart.value = doc.recordStart;
+  entries.value = doc.entries;
+  backups.value = doc.backups;
+  rawSourceEntries.value = doc.entries.map((entry) => ({ ...entry }));
+  rawEditorText.value = serializeEntriesToRaw(doc.entries);
+  persistLastOpenPath(doc.filePath);
 }
 
 async function loadCurrentFile(filePath = lexPath.value, manageLoading = true) {
@@ -478,25 +476,20 @@ function App() {
             )}
           ></KTFor>
         </div>
-
-        <div class={progressClassName}>
-          <LinearProgress variant="indeterminate" color="warning"></LinearProgress>
-        </div>
       </header>
 
       <section class="editor-frame">
-        <div k-if={hasActiveFile} class="editor-surface">
-          <TextField
+        <div k-if={hasActiveFile} class="raw-editor-field">
+          <textarea
             k-model={rawEditorText}
             class="raw-editor-field"
             multiline
             rows={30}
             fullWidth
             placeholder="例如：自定义词/zi ding yi ci/1"
-          ></TextField>
+          ></textarea>
         </div>
-
-        <div k-if={hasNoActiveFile} class="empty-state">
+        <div k-else class="empty-state">
           <div class="empty-card">
             <div class="empty-icon">
               <FolderOpen class="empty-icon-svg" />
@@ -524,7 +517,7 @@ function App() {
         <div class="status-bar-group status-bar-group-right">
           <span class="status-bar-item">导出 {exportTime.map((value) => formatTimestamp(value))}</span>
           <span class="status-bar-item">
-            Record Start {recordStart.map((value) => (value === null ? '0x--' : `0x${value.toString(16)}`))}
+            起始锚点 {recordStart.map((value) => (value === null ? '0x--' : `0x${value.toString(16)}`))}
           </span>
         </div>
       </footer>
