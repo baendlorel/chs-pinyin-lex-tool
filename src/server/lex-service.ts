@@ -7,6 +7,8 @@ const DEFAULT_HEAD16 = Buffer.from([
   0x6d, 0x73, 0x63, 0x68, 0x78, 0x75, 0x64, 0x70, 0x02, 0x00, 0x60, 0x00, 0x01, 0x00, 0x00, 0x00,
 ]);
 const BACKUP_COUNT = 3;
+const ORIGIN_SUFFIX = '.origin';
+const EXTRA_SUFFIX = '.extra';
 
 export interface LexEntry {
   id: string;
@@ -217,6 +219,44 @@ function getTemplateHeader(entry: LexEntry) {
   return entry.rawHeaderBase64 ? Buffer.from(entry.rawHeaderBase64, 'base64') : undefined;
 }
 
+function escapeRawField(value: string) {
+  return value.replaceAll('\\', '\\\\').replaceAll('/', '\\/');
+}
+
+function splitRawLine(line: string) {
+  const parts: string[] = [];
+  let current = '';
+  let escaped = false;
+
+  for (const char of line) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '/') {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (escaped) {
+    current += '\\';
+  }
+
+  parts.push(current);
+  return parts;
+}
+
 function buildLexBuffer(entries: LexEntry[], oldLex?: ParsedLexFile) {
   const sortedEntries = entries
     .map((entry) => ({ ...entry }))
@@ -275,8 +315,130 @@ function toSerializedEntry(record: ParsedLexRecord): LexEntry {
   };
 }
 
+function getOriginPath(filePath: string) {
+  return `${filePath}${ORIGIN_SUFFIX}`;
+}
+
+function getExtraPath(filePath: string) {
+  return `${filePath}${EXTRA_SUFFIX}`;
+}
+
 function getBackupPath(filePath: string, backupIndex: number) {
-  return `${filePath}.bak${backupIndex}`;
+  return `${getExtraPath(filePath)}.bak${backupIndex}`;
+}
+
+function serializeExtraEntries(entries: LexEntry[]) {
+  return entries
+    .map((entry) => [escapeRawField(entry.text), escapeRawField(entry.pinyin), String(entry.index)].join('/'))
+    .join('\n');
+}
+
+function parseExtraEntries(content: string): LexEntry[] {
+  const nextEntries: LexEntry[] = [];
+  const lines = content.split(/\r?\n/u);
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    if (!line.trim()) {
+      continue;
+    }
+
+    const fields = splitRawLine(line);
+    if (fields.length !== 3) {
+      throw new Error(`Extra line ${lineIndex + 1} must use the format phrase/pinyin/frequency`);
+    }
+
+    const indexValue = Number(fields[2]);
+    if (!Number.isInteger(indexValue) || indexValue < 1 || indexValue > 9) {
+      throw new Error(`Extra line ${lineIndex + 1} frequency must be an integer between 1 and 9`);
+    }
+
+    nextEntries.push({
+      id: createEntryId(Buffer.alloc(16, 0), fields[1], indexValue, fields[0]),
+      text: fields[0],
+      pinyin: fields[1],
+      index: indexValue,
+      rawHeaderBase64: '',
+    });
+  }
+
+  return nextEntries;
+}
+
+function readExtraEntries(filePath: string) {
+  const extraPath = ensureExtraFile(filePath);
+  return parseExtraEntries(fs.readFileSync(extraPath, 'utf8'));
+}
+
+function writeExtraEntries(filePath: string, entries: LexEntry[]) {
+  fs.writeFileSync(getExtraPath(filePath), serializeExtraEntries(entries), 'utf8');
+}
+
+function mergeOriginAndExtraEntries(originEntries: LexEntry[], extraEntries: LexEntry[]) {
+  const mergedEntries = originEntries.map((entry) => ({ ...entry }));
+  const originIndexByKey = new Map<string, number>();
+
+  for (let index = 0; index < mergedEntries.length; index += 1) {
+    const entry = mergedEntries[index];
+    originIndexByKey.set(`${entry.text}\u0000${entry.pinyin}`, index);
+  }
+
+  for (const extraEntry of extraEntries) {
+    const key = `${extraEntry.text}\u0000${extraEntry.pinyin}`;
+    const originIndex = originIndexByKey.get(key);
+    if (originIndex === undefined) {
+      mergedEntries.push({ ...extraEntry, rawHeaderBase64: extraEntry.rawHeaderBase64 || '' });
+      continue;
+    }
+
+    mergedEntries[originIndex] = {
+      ...mergedEntries[originIndex],
+      ...extraEntry,
+      rawHeaderBase64: mergedEntries[originIndex].rawHeaderBase64,
+    };
+  }
+
+  return mergedEntries;
+}
+
+function ensureOriginFile(filePath: string) {
+  const originPath = getOriginPath(filePath);
+  if (fs.existsSync(originPath)) {
+    return originPath;
+  }
+
+  if (fs.existsSync(filePath)) {
+    fs.copyFileSync(filePath, originPath);
+    return originPath;
+  }
+
+  fs.writeFileSync(originPath, buildLexBuffer([]));
+  return originPath;
+}
+
+function ensureExtraFile(filePath: string) {
+  const extraPath = getExtraPath(filePath);
+  if (fs.existsSync(extraPath)) {
+    return extraPath;
+  }
+
+  fs.writeFileSync(extraPath, '', 'utf8');
+  return extraPath;
+}
+
+function ensureEditableArtifacts(filePath: string) {
+  const originPath = ensureOriginFile(filePath);
+  const extraPath = ensureExtraFile(filePath);
+
+  return {
+    originPath,
+    extraPath,
+  };
+}
+
+function getOriginLex(filePath: string) {
+  const { originPath } = ensureEditableArtifacts(filePath);
+  return parseLexBuffer(originPath, fs.readFileSync(originPath));
 }
 
 export function listLexBackups(filePath: string): LexBackupInfo[] {
@@ -302,6 +464,8 @@ export function listLexBackups(filePath: string): LexBackupInfo[] {
 }
 
 export function rotateLexBackups(filePath: string) {
+  const extraPath = getExtraPath(filePath);
+
   for (let index = BACKUP_COUNT - 1; index >= 1; index -= 1) {
     const nextPath = getBackupPath(filePath, index);
     const previousPath = getBackupPath(filePath, index - 1);
@@ -312,8 +476,8 @@ export function rotateLexBackups(filePath: string) {
     fs.copyFileSync(previousPath, nextPath);
   }
 
-  if (fs.existsSync(filePath)) {
-    fs.copyFileSync(filePath, getBackupPath(filePath, 0));
+  if (fs.existsSync(extraPath)) {
+    fs.copyFileSync(extraPath, getBackupPath(filePath, 0));
   }
 }
 
@@ -403,25 +567,31 @@ export function scanLexDirectory(inputPath: string): LexDirectoryScanResult {
 }
 
 export function loadLexFile(filePath: string): LoadedLexFile {
-  const parsedFile = parseLexBuffer(filePath, fs.readFileSync(filePath));
+  const originLex = getOriginLex(filePath);
+  const currentLex = fs.existsSync(filePath) ? parseLexBuffer(filePath, fs.readFileSync(filePath)) : originLex;
+  const extraEntries = sanitizeLexEntries(readExtraEntries(filePath));
 
   return {
     filePath: toWindowsDisplayPath(filePath),
     fileName: path.basename(filePath),
     directoryPath: toWindowsDisplayPath(path.dirname(filePath)),
-    count: parsedFile.count,
-    exportTime: parsedFile.exportTime,
-    recordStart: parsedFile.recordStart,
+    count: currentLex.count,
+    exportTime: currentLex.exportTime,
+    recordStart: currentLex.recordStart,
     backups: listLexBackups(filePath),
-    entries: parsedFile.entries.map(toSerializedEntry),
+    entries: extraEntries,
   };
 }
 
 export function saveLexFile(filePath: string, entries: LexEntry[]) {
-  const previousFile = fs.existsSync(filePath) ? parseLexBuffer(filePath, fs.readFileSync(filePath)) : undefined;
-  const nextEntries = sanitizeLexEntries(entries);
+  const originLex = getOriginLex(filePath);
+  const previousFile = fs.existsSync(filePath) ? parseLexBuffer(filePath, fs.readFileSync(filePath)) : originLex;
+  const nextEntries = sanitizeLexEntries(entries).map((entry) => ({ ...entry, rawHeaderBase64: '' }));
+  const mergedEntries = mergeOriginAndExtraEntries(originLex.entries.map(toSerializedEntry), nextEntries);
+
   rotateLexBackups(filePath);
-  fs.writeFileSync(filePath, buildLexBuffer(nextEntries, previousFile));
+  writeExtraEntries(filePath, nextEntries);
+  fs.writeFileSync(filePath, buildLexBuffer(mergedEntries, previousFile));
   return loadLexFile(filePath);
 }
 
@@ -435,9 +605,19 @@ export function restoreLexBackup(filePath: string, backupIndex: number) {
     throw new Error(`Backup ${backupIndex} does not exist`);
   }
 
-  const backupBuffer = fs.readFileSync(backupPath);
+  const backupContent = fs.readFileSync(backupPath, 'utf8');
+  const originLex = getOriginLex(filePath);
+  const previousFile = fs.existsSync(filePath) ? parseLexBuffer(filePath, fs.readFileSync(filePath)) : originLex;
   rotateLexBackups(filePath);
-  fs.writeFileSync(filePath, backupBuffer);
+
+  fs.writeFileSync(getExtraPath(filePath), backupContent, 'utf8');
+
+  const restoredExtraEntries = sanitizeLexEntries(parseExtraEntries(backupContent)).map((entry) => ({
+    ...entry,
+    rawHeaderBase64: '',
+  }));
+  const mergedEntries = mergeOriginAndExtraEntries(originLex.entries.map(toSerializedEntry), restoredExtraEntries);
+  fs.writeFileSync(filePath, buildLexBuffer(mergedEntries, previousFile));
   return loadLexFile(filePath);
 }
 

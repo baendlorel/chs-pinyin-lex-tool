@@ -62,6 +62,7 @@ function resolveLexFilePath(payload: PathPayload) {
 function createServer() {
   const app = Fastify({
     logger: true,
+    bodyLimit: 50 * 1024 * 1024,
   });
 
   app.setErrorHandler((error, _request, reply) => {
