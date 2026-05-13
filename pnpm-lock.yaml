@@ -12,8 +12,8 @@ importers:
         specifier: ^8.3.0
         version: 8.3.0
       '@ktjs/mui':
-        specifier: ^0.40.23
-        version: 0.40.23(@ktjs/core@0.40.23(@ktjs/shared@0.40.1))(@ktjs/mui-icon@0.40.1(@ktjs/shared@0.40.1))(@ktjs/shared@0.40.1)
+        specifier: ^0.40.24
+        version: 0.40.24(@ktjs/core@0.40.24(@ktjs/shared@0.40.1))(@ktjs/mui-icon@0.40.1(@ktjs/shared@0.40.1))(@ktjs/shared@0.40.1)
       '@ktjs/mui-icon':
         specifier: ^0.40.1
         version: 0.40.1(@ktjs/shared@0.40.1)
@@ -30,8 +30,8 @@ importers:
         specifier: ^5.8.5
         version: 5.8.5
       kt.js:
-        specifier: ^0.40.23
-        version: 0.40.23(@ktjs/shared@0.40.1)
+        specifier: ^0.40.24
+        version: 0.40.24(@ktjs/shared@0.40.1)
     devDependencies:
       concurrently:
         specifier: ^9.2.1
@@ -336,16 +336,16 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@ktjs/core@0.40.23':
-    resolution: {integrity: sha512-79j2hEz8EHQ5I3Bts5P30TGtjVMbKTfyPB3ij9bBufxpLCr0JTwEaL+cYqz1lOe9N3uW6b6ZqZSfgwrFPk2dAA==}
+  '@ktjs/core@0.40.24':
+    resolution: {integrity: sha512-jzT4hNAxElGMWSWPLgMeWLnmrlNKvpf98bZJE+gp+nqpxQGN7r6i9lNnq/e4nKQxMJjT88AyEYftFxq1QDF5CQ==}
     peerDependencies:
       '@ktjs/shared': ^*
 
   '@ktjs/mui-icon@0.40.1':
     resolution: {integrity: sha512-CfafZDBa9lkIwoaHovs3tpUl1kdv4fd9r6rc4v/kchx4bzxKQSByfDGI9lptx+BfWzIQUenUzyeZaAv8ApDK+A==}
 
-  '@ktjs/mui@0.40.23':
-    resolution: {integrity: sha512-2yVP1SYhC9h587eZe+kEQR5Zziw/Ba3lw0BKqIv1uqYgg1nheVCM1T86J+4vBVZ3wOyxJpOiZDzbeBy2ZSYVJQ==}
+  '@ktjs/mui@0.40.24':
+    resolution: {integrity: sha512-rPz4QA8UwRM6Ie+OM8rgFx9djPtKfWRl5p143lhl06KLMfFiEK5Z4r1rFlfq00z+qoGvt28GNw5l5+XcjYfztA==}
     peerDependencies:
       '@ktjs/core': ^*
       '@ktjs/mui-icon': ^*
@@ -900,8 +900,8 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  kt.js@0.40.23:
-    resolution: {integrity: sha512-on+cIEzzaEYEIRB6Cb5o83uoU5VA5qHAKZGva1b5uFWTKb44jWwIRFFQcRltaldkGabMJYU20hnSLDBqUvFPTA==}
+  kt.js@0.40.24:
+    resolution: {integrity: sha512-m+OR7zYf/p1Ck5k/mQU+vuzP53OczUZo8N0GCRa5xyOgxmlwxTv5mHh7f55ads3MuoCPYiKV95GeklT6rhrH6w==}
 
   light-my-request@6.6.0:
     resolution: {integrity: sha512-CHYbu8RtboSIoVsHZ6Ye4cj4Aw/yg2oAFimlF7mNvfDV192LR7nDiKtSIfCuLT7KokPSTn/9kfVLm5OGN0A28A==}
@@ -1627,19 +1627,19 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@ktjs/core@0.40.23(@ktjs/shared@0.40.1)':
+  '@ktjs/core@0.40.24(@ktjs/shared@0.40.1)':
     dependencies:
       '@ktjs/shared': 0.40.1
 
   '@ktjs/mui-icon@0.40.1(@ktjs/shared@0.40.1)':
     dependencies:
-      '@ktjs/core': 0.40.23(@ktjs/shared@0.40.1)
+      '@ktjs/core': 0.40.24(@ktjs/shared@0.40.1)
     transitivePeerDependencies:
       - '@ktjs/shared'
 
-  '@ktjs/mui@0.40.23(@ktjs/core@0.40.23(@ktjs/shared@0.40.1))(@ktjs/mui-icon@0.40.1(@ktjs/shared@0.40.1))(@ktjs/shared@0.40.1)':
+  '@ktjs/mui@0.40.24(@ktjs/core@0.40.24(@ktjs/shared@0.40.1))(@ktjs/mui-icon@0.40.1(@ktjs/shared@0.40.1))(@ktjs/shared@0.40.1)':
     dependencies:
-      '@ktjs/core': 0.40.23(@ktjs/shared@0.40.1)
+      '@ktjs/core': 0.40.24(@ktjs/shared@0.40.1)
       '@ktjs/mui-icon': 0.40.1(@ktjs/shared@0.40.1)
       '@ktjs/shared': 0.40.1
 
@@ -2100,9 +2100,9 @@ snapshots:
 
   json5@2.2.3: {}
 
-  kt.js@0.40.23(@ktjs/shared@0.40.1):
+  kt.js@0.40.24(@ktjs/shared@0.40.1):
     dependencies:
-      '@ktjs/core': 0.40.23(@ktjs/shared@0.40.1)
+      '@ktjs/core': 0.40.24(@ktjs/shared@0.40.1)
     transitivePeerDependencies:
       - '@ktjs/shared'
 

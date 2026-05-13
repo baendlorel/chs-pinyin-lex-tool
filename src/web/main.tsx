@@ -1,4 +1,5 @@
-import { Alert, Dialog, LinearProgress, TextField } from '@ktjs/mui';
+import { Alert, Button, Dialog, LinearProgress, Select, TextField } from '@ktjs/mui';
+import { Description, FolderOpen, Refresh, Restore, Save, Search, UploadFile } from '@ktjs/mui-icon';
 import { KTFor, computed, ref } from 'kt.js';
 
 import './style.css';
@@ -69,6 +70,10 @@ const rawEditorText = ref('');
 const rawSourceEntries = ref<LexEntry[]>([]);
 
 const busy = computed(() => loading.value || saving.value, [loading, saving]);
+const fileOptions = computed(
+  () => lexFiles.value.map((fileName) => ({ value: fileName, label: fileName })),
+  [lexFiles],
+);
 const hasActiveFile = computed(() => loadedFilePath.value !== '', [loadedFilePath]);
 const hasNoActiveFile = computed(() => !hasActiveFile.value, [hasActiveFile]);
 const progressClassName = computed(() => `progress-wrap ${busy.value ? '' : 'is-hidden'}`, [busy]);
@@ -457,7 +462,7 @@ function App() {
       <header class="ribbon-shell">
         <div class="ribbon-topline">
           <div>
-            {/* <p class="app-kicker"></p> */}
+            {/* <p class="app-kicker">KT.js + MUI</p> */}
             <h1 class="app-title">Microsoft Pinyin Lex 编辑器</h1>
           </div>
           {/* <p class="app-note">启动时会自动恢复上次成功打开的路径并重新扫描。</p> */}
@@ -472,82 +477,69 @@ function App() {
         />
 
         <div class="ribbon-row">
-          <label class="toolbar-field path-field">
-            <span class="toolbar-label">路径</span>
-            <input
-              class="toolbar-input"
-              value={directoryInput}
-              placeholder="C:\\Users\\Alice\\AppData\\Local\\Microsoft\\InputMethod 或 .lex 文件"
-              on:input={(event) => {
-                directoryInput.value = (event.currentTarget as HTMLInputElement).value;
-              }}
-            />
-          </label>
+          <TextField
+            class="toolbar-text-field"
+            k-model={directoryInput}
+            fullWidth
+            label="Windows 目录或 .lex 文件路径"
+            placeholder="C:\\Users\\Alice\\AppData\\Local\\Microsoft\\InputMethod 或 .lex 文件"
+          ></TextField>
 
-          <label class="toolbar-field file-field">
-            <span class="toolbar-label">词库文件</span>
-            <select
-              class="toolbar-select"
-              value={selectedFileName}
-              disabled={lexFiles.map((items) => items.length === 0 || busy.value)}
-              on:change={(event) => {
-                const nextFileName = (event.currentTarget as HTMLSelectElement).value;
-                selectedFileName.value = nextFileName;
-                void loadCurrentFile(nextFileName);
-              }}
-            >
-              <option value="">先扫描目录</option>
-              <KTFor
-                list={lexFiles}
-                key={(fileName) => fileName}
-                map={(fileName) => <option value={fileName}>{fileName}</option>}
-              ></KTFor>
-            </select>
-          </label>
+          <Select
+            class="toolbar-select-field"
+            value={selectedFileName}
+            options={fileOptions}
+            placeholder="先扫描目录"
+            fullWidth
+            label="检测到的 .lex 文件"
+            disabled={lexFiles.map((items) => items.length === 0 || busy.value)}
+            on:change={(value) => {
+              const nextFileName = String(value);
+              selectedFileName.value = nextFileName;
+              void loadCurrentFile(nextFileName);
+            }}
+          ></Select>
 
           <div class="toolbar-actions">
-            <button type="button" class="toolbar-button" disabled={busy} on:click={() => void scanDirectory()}>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M11 4a7 7 0 1 0 6.1 10.4l2.7 2.7 1.4-1.4-2.7-2.7A7 7 0 0 0 11 4Zm0 2a5 5 0 1 1 0 10a5 5 0 0 1 0-10Z"></path>
-              </svg>
-              <span>扫描</span>
-            </button>
+            <Button
+              variant="outlined"
+              color="primary"
+              disabled={busy}
+              startIcon={<Search />}
+              on:click={() => void scanDirectory()}
+            >
+              扫描
+            </Button>
 
-            <button
-              type="button"
-              class="toolbar-button"
+            <Button
+              variant="outlined"
+              color="warning"
               disabled={busy.map((value) => value || !hasActiveFile.value)}
+              startIcon={<Refresh />}
               on:click={() => void loadCurrentFile()}
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 5V2L7 6l5 4V7c3.3 0 6 2.7 6 6a6 6 0 0 1-10.2 4.2l-1.4 1.4A8 8 0 1 0 12 5Z"></path>
-              </svg>
-              <span>重载</span>
-            </button>
+              重载
+            </Button>
 
-            <button
-              type="button"
-              class="toolbar-button"
+            <Button
+              variant="outlined"
+              color="secondary"
               disabled={busy.map((value) => value || !hasActiveFile.value)}
+              startIcon={<UploadFile />}
               on:click={() => importFileInput.value?.click()}
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M11 3h2v8.2l2.6-2.6L17 10l-5 5l-5-5l1.4-1.4L11 11.2V3Zm-6 14h14v2H5v-2Z"></path>
-              </svg>
-              <span>导入</span>
-            </button>
+              导入
+            </Button>
 
-            <button
-              type="button"
-              class="toolbar-button toolbar-button-primary"
+            <Button
+              variant="contained"
+              color="success"
               disabled={busy.map((value) => value || !hasActiveFile.value)}
+              startIcon={<Save />}
               on:click={() => void saveEntries()}
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 3h11l3 3v15H5V3Zm2 2v14h10V7.2L15.8 5H15v4H9V5H7Zm4 0v2h2V5h-2Zm-2 8h6v4H9v-4Z"></path>
-              </svg>
-              <span>保存</span>
-            </button>
+              保存
+            </Button>
           </div>
         </div>
 
@@ -567,16 +559,16 @@ function App() {
             list={backups}
             key={(backup) => backup.index}
             map={(backup) => (
-              <button
-                type="button"
-                class="backup-button"
+              <Button
+                variant="text"
+                color="warning"
                 disabled={busy.map((value) => value || !backup.exists, [busy, backups])}
-                title={backup.exists ? formatBackupTime(backup.updatedAt) : '当前槽位暂无备份文件'}
+                startIcon={<Restore />}
                 on:click={() => void restoreBackup(backup.index)}
               >
-                <span>{`bak${backup.index}`}</span>
-                <small>{backup.exists ? formatBackupTime(backup.updatedAt) : '空'}</small>
-              </button>
+                <span style="margin-right:5px">备份{backup.index}</span>
+                <small>{backup.exists ? formatBackupTime(backup.updatedAt) : '暂无'}</small>
+              </Button>
             )}
           ></KTFor>
         </div>
@@ -591,7 +583,10 @@ function App() {
         <article k-if={hasActiveFile} class="editor-sheet">
           <header class="document-header">
             <p class="document-kicker">RAW DOCUMENT</p>
-            <h2 class="document-title">{selectedFileName}</h2>
+            <h2 class="document-title">
+              <Description class="document-title-icon" />
+              <span>{selectedFileName}</span>
+            </h2>
             <p class="document-note">
               每行格式为 词条/拼音/排位。若字段中需要包含 / 或 \\，请写成 \/ 与 \\\\。可选第 4 段为附加属性值。
             </p>
@@ -599,14 +594,14 @@ function App() {
 
           <div class={rawStatusClassName}>{rawStatusText}</div>
 
-          <textarea
-            class="raw-editor"
-            value={rawEditorText}
+          <TextField
+            class="raw-editor-field"
+            k-model={rawEditorText}
+            multiline
+            rows={26}
+            fullWidth
             placeholder="例如：自定义词/zi ding yi ci/1"
-            on:input={(event) => {
-              rawEditorText.value = (event.currentTarget as HTMLTextAreaElement).value;
-            }}
-          ></textarea>
+          ></TextField>
 
           <p k-if={rawError} class="document-warning">
             {rawError}
@@ -616,9 +611,7 @@ function App() {
         <div k-if={hasNoActiveFile} class="empty-state">
           <div class="empty-card">
             <div class="empty-icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M6 3h9l5 5v13H6V3Zm2 2v14h10V9h-4V5H8Zm2 7h6v2h-6v-2Zm0 4h4v2h-4v-2Z"></path>
-              </svg>
+              <FolderOpen class="empty-icon-svg" />
             </div>
             <h3>先打开一个词库</h3>
             <p>
@@ -635,17 +628,24 @@ function App() {
         width="720px"
         actions={
           <div class="dialog-actions">
-            <button type="button" class="dialog-button" on:click={() => (importDialogOpen.value = false)}>
+            <Button
+              variant="text"
+              color="secondary"
+              class="dialog-button"
+              on:click={() => (importDialogOpen.value = false)}
+            >
               取消
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               class="dialog-button dialog-button-primary"
+              variant="contained"
+              color="primary"
               disabled={saving}
+              startIcon={<UploadFile class="dialog-button-icon" />}
               on:click={() => void importCurrentText()}
             >
               导入并合并
-            </button>
+            </Button>
           </div>
         }
       >
