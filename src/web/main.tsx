@@ -1,5 +1,5 @@
-import { Button, Dialog, LinearProgress, Select, TextField } from '@ktjs/mui';
-import { FolderOpen, Refresh, Restore, Save, Search, UploadFile } from '@ktjs/mui-icon';
+import { Button, Dialog, LinearProgress, TextField } from '@ktjs/mui';
+import { FolderOpen, Restore, Save } from '@ktjs/mui-icon';
 import { KTFor, computed, ref } from 'kt.js';
 
 import './style.css';
@@ -51,7 +51,7 @@ interface RawParseResult {
   error: string | null;
 }
 
-const directoryInput = ref('');
+const lexPath = ref('');
 const selectedFileName = ref('');
 const loadedFilePath = ref('');
 const entries = ref<LexEntry[]>([]);
@@ -64,7 +64,6 @@ const importText = ref('');
 const alertState = ref<AlertState | null>(null);
 const exportTime = ref<number | null>(null);
 const recordStart = ref<number | null>(null);
-const importFileInput = ref<HTMLInputElement>();
 const rawEditorText = ref('');
 const rawSourceEntries = ref<LexEntry[]>([]);
 const searchQuery = ref('');
@@ -75,18 +74,9 @@ const lastSearchQuery = ref('');
 const rawEditorSurface = ref<HTMLDivElement>();
 
 const busy = computed(() => loading.value || saving.value, [loading, saving]);
-const fileOptions = computed(
-  () => lexFiles.value.map((fileName) => ({ value: fileName, label: fileName })),
-  [lexFiles],
-);
 const hasActiveFile = computed(() => loadedFilePath.value !== '', [loadedFilePath]);
-const hasNoActiveFile = computed(() => !hasActiveFile.value, [hasActiveFile]);
-const hasSearchQuery = computed(() => searchQuery.value.trim() !== '', [searchQuery]);
+const hasNoActiveFile = loadedFilePath.is('');
 const progressClassName = computed(() => `progress-wrap ${busy.value ? '' : 'is-hidden'}`, [busy]);
-const searchButtonDisabled = computed(
-  () => busy.value || !hasActiveFile.value || !hasSearchQuery.value,
-  [busy, hasActiveFile, hasSearchQuery],
-);
 
 function extractErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -281,7 +271,7 @@ async function requestJson<T>(input: string, body?: unknown) {
 }
 
 function applyLoadedDocument(document: LoadedLexFile) {
-  directoryInput.value = document.filePath;
+  lexPath.value = document.filePath;
   loadedFilePath.value = document.filePath;
   selectedFileName.value = document.fileName;
   exportTime.value = document.exportTime;
@@ -316,7 +306,7 @@ async function loadCurrentFile(fileName = selectedFileName.value, manageLoading 
 
   try {
     const document = await requestJson<LoadedLexFile>('/api/lex/load', {
-      directoryPath: directoryInput.value,
+      directoryPath: lexPath.value,
       fileName,
     });
     applyLoadedDocument(document);
@@ -331,7 +321,7 @@ async function loadCurrentFile(fileName = selectedFileName.value, manageLoading 
 }
 
 async function scanDirectory() {
-  if (!directoryInput.value.trim()) {
+  if (!lexPath.value.trim()) {
     showAlert('warning', '请先输入目录或 .lex 文件路径。');
     return;
   }
@@ -340,9 +330,9 @@ async function scanDirectory() {
 
   try {
     const result = await requestJson<LexDirectoryScanResult>('/api/lex/scan', {
-      directoryPath: directoryInput.value,
+      directoryPath: lexPath.value,
     });
-    directoryInput.value = result.selectedFileName
+    lexPath.value = result.selectedFileName
       ? `${result.directoryPath}/${result.selectedFileName}`
       : result.directoryPath;
     lexFiles.value = result.files;
@@ -384,7 +374,7 @@ async function saveEntries() {
 
   try {
     const document = await requestJson<LoadedLexFile>('/api/lex/save', {
-      directoryPath: directoryInput.value,
+      directoryPath: lexPath.value,
       fileName: selectedFileName.value,
       entries: rawValidation.value.entries,
     });
@@ -410,7 +400,7 @@ async function restoreBackup(backupIndex: number) {
 
   try {
     const document = await requestJson<LoadedLexFile>('/api/lex/restore', {
-      directoryPath: directoryInput.value,
+      directoryPath: lexPath.value,
       fileName: selectedFileName.value,
       backupIndex,
     });
@@ -433,7 +423,7 @@ async function importCurrentText() {
 
   try {
     const document = await requestJson<LoadedLexFile>('/api/lex/import', {
-      directoryPath: directoryInput.value,
+      directoryPath: lexPath.value,
       fileName: selectedFileName.value,
       content: importText.value,
     });
@@ -473,7 +463,7 @@ function restoreLastOpenPathAndScan() {
     return;
   }
 
-  directoryInput.value = savedPath;
+  lexPath.value = savedPath;
   void scanDirectory();
 }
 
@@ -569,129 +559,53 @@ function App() {
           </h1>
         </div>
 
-        <input
-          ref={importFileInput}
-          type="file"
-          accept=".txt,text/plain"
-          style="display:none"
-          on:change={handleImportFileChange}
-        />
-
         <div class="ribbon-row">
           <TextField
-            class="toolbar-text-field"
-            k-model={directoryInput}
+            k-model={lexPath}
             fullWidth
             size="small"
-            placeholder="C:\\Users\\Alice\\AppData\\Local\\Microsoft\\InputMethod 或 .lex 文件"
+            placeholder="C:\Users\...\InputMethod\xxx.lex"
           ></TextField>
-
-          <Select
-            class="toolbar-select-field"
-            value={selectedFileName}
-            options={fileOptions}
-            placeholder="选择 .lex 文件"
-            fullWidth
-            disabled={lexFiles.map((items) => items.length === 0 || busy.value)}
-            on:change={(value) => {
-              const nextFileName = String(value);
-              selectedFileName.value = nextFileName;
-              void loadCurrentFile(nextFileName);
-            }}
-          ></Select>
-
-          <div class="toolbar-search">
-            <TextField
-              class="toolbar-search-field"
-              k-model={searchQuery}
-              fullWidth
-              size="small"
-              placeholder="搜索词汇"
-              disabled={hasNoActiveFile}
-              on:input={(value) => handleSearchInput(String(value))}
-            ></TextField>
-            <Button
-              class="toolbar-action-button"
-              variant="text"
-              color="primary"
-              size="small"
-              disabled={searchButtonDisabled}
-              startIcon={<Search />}
-              on:click={() => locateSearchMatch()}
-            >
-              下一个
-            </Button>
-          </div>
 
           <div class="toolbar-actions">
             <Button
-              class="toolbar-action-button"
-              variant="outlined"
+              variant="contained"
               color="primary"
               size="small"
               disabled={busy}
-              startIcon={<Search />}
-              on:click={() => void scanDirectory()}
-            >
-              扫描
-            </Button>
-
+              startIcon={<FolderOpen />}
+              on:click={saveEntries}
+              iconOnly
+            ></Button>
             <Button
-              class="toolbar-action-button"
-              variant="outlined"
-              color="warning"
-              size="small"
-              disabled={busy.map((value) => value || !hasActiveFile.value)}
-              startIcon={<Refresh />}
-              on:click={() => void loadCurrentFile()}
-            >
-              重载
-            </Button>
-
-            <Button
-              class="toolbar-action-button"
-              variant="outlined"
-              color="secondary"
-              size="small"
-              disabled={busy.map((value) => value || !hasActiveFile.value)}
-              startIcon={<UploadFile />}
-              on:click={() => importFileInput.value?.click()}
-            >
-              导入
-            </Button>
-
-            <Button
-              class="toolbar-action-button"
               variant="contained"
-              color="success"
+              color="primary"
               size="small"
-              disabled={busy.map((value) => value || !hasActiveFile.value)}
+              disabled={busy.map((value) => value || !hasActiveFile.value, [hasActiveFile])}
               startIcon={<Save />}
-              on:click={() => void saveEntries()}
-            >
-              保存
-            </Button>
-          </div>
-        </div>
+              on:click={saveEntries}
+              iconOnly
+            ></Button>
 
-        <div class="backup-strip">
-          <KTFor
-            list={backups}
-            key={(backup) => backup.index}
-            map={(backup) => (
-              <Button
-                class="backup-button"
-                variant="text"
-                color="warning"
-                size="small"
-                disabled={busy.map((value) => value || !backup.exists, [busy, backups])}
-                startIcon={<Restore />}
-                on:click={() => void restoreBackup(backup.index)}
-              >
-                bak{backup.index}
-              </Button>
-            )}
-          ></KTFor>
+            <div style="margin-left:10px"></div>
+
+            <KTFor
+              list={backups}
+              key={(backup) => backup.index}
+              map={(backup) => (
+                <Button
+                  variant="text"
+                  color="warning"
+                  size="small"
+                  disabled={busy.map((value) => value || !backup.exists, [busy, backups])}
+                  startIcon={<Restore />}
+                  on:click={() => void restoreBackup(backup.index)}
+                >
+                  bak{backup.index}
+                </Button>
+              )}
+            ></KTFor>
+          </div>
         </div>
 
         <div class={progressClassName}>
@@ -702,7 +616,6 @@ function App() {
       <section class="editor-frame">
         <div k-if={hasActiveFile} class="editor-surface" ref={rawEditorSurface}>
           <TextField
-            class="raw-editor-field"
             k-model={rawEditorText}
             multiline
             rows={30}
@@ -749,41 +662,6 @@ function App() {
           </span>
         </div>
       </footer>
-
-      <Dialog
-        k-model={importDialogOpen}
-        title="导入词条文本"
-        width="720px"
-        actions={
-          <div class="dialog-actions">
-            <Button
-              variant="text"
-              color="secondary"
-              class="dialog-button"
-              on:click={() => (importDialogOpen.value = false)}
-            >
-              取消
-            </Button>
-            <Button
-              class="dialog-button dialog-button-primary"
-              variant="contained"
-              color="primary"
-              disabled={saving}
-              startIcon={<UploadFile class="dialog-button-icon" />}
-              on:click={() => void importCurrentText()}
-            >
-              导入并合并
-            </Button>
-          </div>
-        }
-      >
-        <div>
-          <p class="import-helper">
-            每行一条，格式固定为 词语/拼音。词语与拼音都允许包含空格，解析时以最后一个 / 为分隔符。
-          </p>
-          <TextField k-model={importText} multiline rows={10} fullWidth label="导入文本内容"></TextField>
-        </div>
-      </Dialog>
     </main>
   );
 }
