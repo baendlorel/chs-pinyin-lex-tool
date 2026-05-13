@@ -479,6 +479,7 @@ function App() {
       </header>
 
       <section class="editor-frame">
+        <div class="file-tabs"></div>
         <div k-if={hasActiveFile} class="raw-editor-field">
           <textarea
             k-model={rawEditorText}
