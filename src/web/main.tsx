@@ -543,16 +543,6 @@ function App() {
           </div>
         </div>
 
-        <div class="ribbon-meta">
-          <div class="meta-chip">当前文件：{selectedFileName.map((value) => value || '未选择')}</div>
-          <div class="meta-chip">词条数量：{entryLabel}</div>
-          <div class="meta-chip">导出时间：{exportTime.map((value) => formatTimestamp(value))}</div>
-          <div class="meta-chip">
-            Record Start：{recordStart.map((value) => (value === null ? '0x--' : `0x${value.toString(16)}`))}
-          </div>
-          <div class="meta-chip meta-chip-path">目录：{resolvedDirectory.map((value) => value || '等待扫描')}</div>
-        </div>
-
         <div class="backup-strip">
           <span class="toolbar-label">恢复备份</span>
           <KTFor
@@ -621,6 +611,19 @@ function App() {
           </div>
         </div>
       </section>
+
+      <footer class="status-bar" aria-label="document status">
+        <div class="status-bar-group status-bar-group-left">
+          <span class="status-bar-item">{selectedFileName.map((value) => value || '未选择文件')}</span>
+          <span class="status-bar-item">{entryLabel}</span>
+        </div>
+        <div class="status-bar-group status-bar-group-right">
+          <span class="status-bar-item">导出 {exportTime.map((value) => formatTimestamp(value))}</span>
+          <span class="status-bar-item">
+            Record Start {recordStart.map((value) => (value === null ? '0x--' : `0x${value.toString(16)}`))}
+          </span>
+        </div>
+      </footer>
 
       <Dialog
         k-model={importDialogOpen}
