@@ -6,14 +6,7 @@ import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 
 import type { LexEntry } from './lex-service.js';
-import {
-  loadLexFile,
-  normalizeWindowsPath,
-  parseImportText,
-  restoreLexBackup,
-  saveLexFile,
-  scanLexDirectory,
-} from './lex-service.js';
+import { loadLexFile, normalizeWindowsPath, parseImportText, saveLexFile, scanLexDirectory } from './lex-service.js';
 
 interface PathPayload {
   filePath: string;
@@ -25,10 +18,6 @@ interface SavePayload extends PathPayload {
 
 interface ImportPayload extends PathPayload {
   content: string;
-}
-
-interface RestorePayload extends PathPayload {
-  backupIndex: number;
 }
 
 const currentFilePath = fileURLToPath(import.meta.url);
@@ -105,16 +94,6 @@ function createServer() {
     const loaded = loadLexFile(filePath);
     const mergedEntries = parseImportText(content, loaded.entries);
     return saveLexFile(filePath, mergedEntries);
-  });
-
-  app.post<{ Body: RestorePayload }>('/api/lex/restore', async (request) => {
-    const payload = request.body;
-    if (!Number.isInteger(payload?.backupIndex)) {
-      throw new Error('backupIndex must be an integer');
-    }
-
-    const filePath = resolveLexFilePath(payload ?? { filePath: '' });
-    return restoreLexBackup(filePath, payload.backupIndex);
   });
 
   app.get('/api/path/normalize', async (request) => {

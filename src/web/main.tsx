@@ -1,5 +1,5 @@
 import { Button, Dialog, LinearProgress, TextField } from '@ktjs/mui';
-import { FolderOpen, Restore, Save } from '@ktjs/mui-icon';
+import { FolderOpen, Save } from '@ktjs/mui-icon';
 import { KTFor, computed, ref } from 'kt.js';
 
 import './style.css';
@@ -21,13 +21,6 @@ interface LexEntry {
   rawHeaderBase64: string;
 }
 
-interface LexBackupInfo {
-  index: number;
-  path: string;
-  exists: boolean;
-  updatedAt: string | null;
-}
-
 interface LoadedLexFile {
   filePath: string;
   fileName: string;
@@ -35,7 +28,6 @@ interface LoadedLexFile {
   count: number;
   exportTime: number;
   recordStart: number;
-  backups: LexBackupInfo[];
   entries: LexEntry[];
 }
 
@@ -51,12 +43,22 @@ interface RawParseResult {
   error: string | null;
 }
 
+interface OpenFileTab {
+  filePath: string;
+  fileName: string;
+  exportTime: number | null;
+  recordStart: number | null;
+  rawSourceEntries: LexEntry[];
+  rawText: string;
+  savedRawText: string;
+}
+
 const lexPath = ref('');
 const lexPathDraft = ref('');
 const lexPathDialogOpen = ref(false);
 const loadedFilePath = ref('');
+const openTabs = ref<OpenFileTab[]>([]);
 const entries = ref<LexEntry[]>([]);
-const backups = ref<LexBackupInfo[]>([]);
 const loading = ref(false);
 const saving = ref(false);
 const alertState = ref<AlertState | null>(null);
@@ -76,6 +78,20 @@ const activeFileName = computed(() => {
   const parts = currentPath.split(/[\\/]/u);
   return parts[parts.length - 1] ?? '';
 }, [loadedFilePath]);
+const fileTabs = computed(
+  () =>
+    openTabs.value.map((tab) => ({
+      ...tab,
+      active: tab.filePath === loadedFilePath.value,
+      dirty: tab.rawText !== tab.savedRawText,
+    })),
+  [openTabs, loadedFilePath],
+);
+const hasOpenTabs = computed(() => openTabs.value.length > 0, [openTabs]);
+const activeTabIsDirty = computed(
+  () => fileTabs.value.find((tab) => tab.filePath === loadedFilePath.value)?.dirty ?? false,
+  [fileTabs, loadedFilePath],
+);
 
 function extractErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -101,6 +117,89 @@ function persistLastOpenPath(filePath: string) {
   }
 
   window.localStorage.removeItem(LAST_OPEN_PATH_STORAGE_KEY);
+}
+
+function clearActiveEditorState() {
+  loadedFilePath.value = '';
+  entries.value = [];
+  exportTime.value = null;
+  recordStart.value = null;
+  rawSourceEntries.value = [];
+  rawEditorText.value = '';
+}
+
+function syncEditorFromTab(tab: OpenFileTab | null) {
+  if (!tab) {
+    clearActiveEditorState();
+    return;
+  }
+
+  loadedFilePath.value = tab.filePath;
+  lexPath.value = tab.filePath;
+  entries.value = tab.rawSourceEntries.map((entry) => ({ ...entry }));
+  exportTime.value = tab.exportTime;
+  recordStart.value = tab.recordStart;
+  rawSourceEntries.value = tab.rawSourceEntries.map((entry) => ({ ...entry }));
+  rawEditorText.value = tab.rawText;
+}
+
+function activateTab(filePath: string) {
+  const nextTab = openTabs.value.find((tab) => tab.filePath === filePath) ?? null;
+  syncEditorFromTab(nextTab);
+}
+
+function upsertTab(tab: OpenFileTab) {
+  const nextTabs = openTabs.value.slice();
+  const existingIndex = nextTabs.findIndex((item) => item.filePath === tab.filePath);
+  if (existingIndex >= 0) {
+    nextTabs[existingIndex] = tab;
+  } else {
+    nextTabs.push(tab);
+  }
+
+  openTabs.value = nextTabs;
+}
+
+function closeTab(filePath: string) {
+  const currentTabs = openTabs.value;
+  const closingIndex = currentTabs.findIndex((tab) => tab.filePath === filePath);
+  if (closingIndex < 0) {
+    return;
+  }
+
+  const closingTab = currentTabs[closingIndex];
+  if (closingTab.rawText !== closingTab.savedRawText) {
+    const confirmed = window.confirm(`关闭 ${closingTab.fileName} 前放弃未保存更改？`);
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  const nextTabs = currentTabs.filter((tab) => tab.filePath !== filePath);
+  openTabs.value = nextTabs;
+
+  if (loadedFilePath.value !== filePath) {
+    return;
+  }
+
+  const nextActiveTab = nextTabs[closingIndex] ?? nextTabs[closingIndex - 1] ?? null;
+  syncEditorFromTab(nextActiveTab);
+}
+
+function updateActiveTabRawText(nextRawText: string) {
+  rawEditorText.value = nextRawText;
+
+  const activeIndex = openTabs.value.findIndex((tab) => tab.filePath === loadedFilePath.value);
+  if (activeIndex < 0) {
+    return;
+  }
+
+  const nextTabs = openTabs.value.slice();
+  nextTabs[activeIndex] = {
+    ...nextTabs[activeIndex],
+    rawText: nextRawText,
+  };
+  openTabs.value = nextTabs;
 }
 
 function escapeRawField(value: string) {
@@ -257,14 +356,17 @@ async function requestJson<T>(input: string, body?: unknown) {
 }
 
 function applyLoadedDocument(doc: LoadedLexFile) {
-  lexPath.value = doc.filePath;
-  loadedFilePath.value = doc.filePath;
-  exportTime.value = doc.exportTime;
-  recordStart.value = doc.recordStart;
-  entries.value = doc.entries;
-  backups.value = doc.backups;
-  rawSourceEntries.value = doc.entries.map((entry) => ({ ...entry }));
-  rawEditorText.value = serializeEntriesToRaw(doc.entries);
+  const rawText = serializeEntriesToRaw(doc.entries);
+  upsertTab({
+    filePath: doc.filePath,
+    fileName: doc.fileName,
+    exportTime: doc.exportTime,
+    recordStart: doc.recordStart,
+    rawSourceEntries: doc.entries.map((entry) => ({ ...entry })),
+    rawText,
+    savedRawText: rawText,
+  });
+  activateTab(doc.filePath);
   persistLastOpenPath(doc.filePath);
 }
 
@@ -309,13 +411,7 @@ async function scanDirectory() {
 
     if (!result.selectedFilePath) {
       persistLastOpenPath(result.directoryPath);
-      loadedFilePath.value = '';
-      entries.value = [];
-      backups.value = [];
-      exportTime.value = null;
-      recordStart.value = null;
-      rawEditorText.value = '';
-      rawSourceEntries.value = [];
+      clearActiveEditorState();
       showAlert('warning', '该目录下没有发现 .lex 文件。');
       return;
     }
@@ -347,32 +443,7 @@ async function saveEntries() {
       entries: rawValidation.value.entries,
     });
     applyLoadedDocument(document);
-    showAlert('success', `已保存 ${document.entries.length} 条词条，并写入新的 bak0 备份。`);
-  } catch (error) {
-    showAlert('error', extractErrorMessage(error));
-  } finally {
-    saving.value = false;
-  }
-}
-
-async function restoreBackup(backupIndex: number) {
-  if (!loadedFilePath.value) {
-    return;
-  }
-
-  if (!window.confirm(`确定要恢复 bak${backupIndex} 吗？当前文件会先轮换到新的 bak0。`)) {
-    return;
-  }
-
-  saving.value = true;
-
-  try {
-    const document = await requestJson<LoadedLexFile>('/api/lex/restore', {
-      filePath: loadedFilePath.value,
-      backupIndex,
-    });
-    applyLoadedDocument(document);
-    showAlert('success', `已恢复 bak${backupIndex}。`);
+    showAlert('success', `已保存 ${document.entries.length} 条词条。`);
   } catch (error) {
     showAlert('error', extractErrorMessage(error));
   } finally {
@@ -417,8 +488,22 @@ async function confirmLexPath() {
   await scanDirectory();
 }
 
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') {
+    return;
+  }
+
+  event.preventDefault();
+  if (busy.value || !hasActiveFile.value) {
+    return;
+  }
+
+  void saveEntries();
+}
+
 if (typeof window !== 'undefined' && !autoScanInitialized) {
   autoScanInitialized = true;
+  window.addEventListener('keydown', handleGlobalKeydown);
   window.setTimeout(() => {
     restoreLastOpenPathAndScan();
   }, 0);
@@ -431,9 +516,6 @@ function App() {
         <div class="ribbon-topline">
           <h1 class="app-title">
             <span class="app-title-main">Microsoft Pinyin Lex 编辑器</span>
-            <span k-if={hasActiveFile} class="app-title-file">
-              {activeFileName}
-            </span>
           </h1>
         </div>
 
@@ -456,38 +538,46 @@ function App() {
             on:click={saveEntries}
             iconOnly
           ></Button>
-
-          <div style="flex:1"></div>
-
-          <KTFor
-            list={backups}
-            key={(backup) => backup.index}
-            map={(backup) => (
-              <Button
-                variant="text"
-                color="warning"
-                size="small"
-                disabled={busy.map((value) => value || !backup.exists, [busy, backups])}
-                startIcon={<Restore />}
-                on:click={() => void restoreBackup(backup.index)}
-              >
-                bak{backup.index}
-              </Button>
-            )}
-          ></KTFor>
         </div>
       </header>
 
       <section class="editor-frame">
-        <div class="file-tabs"></div>
-        <div k-if={hasActiveFile} class="raw-editor-field">
+        <div k-if={hasOpenTabs} class="file-tabs">
+          <KTFor
+            list={fileTabs}
+            key={(tab) => tab.filePath}
+            map={(tab) => (
+              <div class={tab.active ? 'file-tab is-active' : 'file-tab'}>
+                <button class="file-tab-trigger" type="button" on:click={() => activateTab(tab.filePath)}>
+                  <span class="file-tab-label">{tab.fileName}</span>
+                  <span k-if={tab.dirty} class="file-tab-dirty">
+                    *
+                  </span>
+                </button>
+                <button
+                  class="file-tab-close"
+                  type="button"
+                  aria-label={`关闭 ${tab.fileName}`}
+                  on:click={(event) => {
+                    event.stopPropagation();
+                    closeTab(tab.filePath);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          ></KTFor>
+        </div>
+        <div k-if={hasActiveFile} class="raw-editor-wrap">
           <textarea
-            k-model={rawEditorText}
             class="raw-editor-field"
-            multiline
+            value={rawEditorText}
             rows={30}
-            fullWidth
             placeholder="例如：自定义词/zi ding yi ci/1"
+            on:input={(event) => {
+              updateActiveTabRawText((event.currentTarget as HTMLTextAreaElement).value);
+            }}
           ></textarea>
         </div>
         <div k-else class="empty-state">
@@ -514,6 +604,9 @@ function App() {
             {statusBarNoticeText}
           </span>
           <span class="status-bar-item">{entryLabel}</span>
+          <span k-if={activeTabIsDirty} class="status-bar-item">
+            未保存
+          </span>
         </div>
         <div class="status-bar-group status-bar-group-right">
           <span class="status-bar-item">导出 {exportTime.map((value) => formatTimestamp(value))}</span>

@@ -6,7 +6,6 @@ const MAGIC = Buffer.from('mschxudp', 'ascii');
 const DEFAULT_HEAD16 = Buffer.from([
   0x6d, 0x73, 0x63, 0x68, 0x78, 0x75, 0x64, 0x70, 0x02, 0x00, 0x60, 0x00, 0x01, 0x00, 0x00, 0x00,
 ]);
-const BACKUP_COUNT = 3;
 const ORIGIN_SUFFIX = '.origin';
 const EXTRA_SUFFIX = '.extra';
 
@@ -18,13 +17,6 @@ export interface LexEntry {
   rawHeaderBase64: string;
 }
 
-export interface LexBackupInfo {
-  index: number;
-  path: string;
-  exists: boolean;
-  updatedAt: string | null;
-}
-
 export interface LoadedLexFile {
   filePath: string;
   fileName: string;
@@ -32,7 +24,6 @@ export interface LoadedLexFile {
   count: number;
   exportTime: number;
   recordStart: number;
-  backups: LexBackupInfo[];
   entries: LexEntry[];
 }
 
@@ -323,10 +314,6 @@ function getExtraPath(filePath: string) {
   return `${filePath}${EXTRA_SUFFIX}`;
 }
 
-function getBackupPath(filePath: string, backupIndex: number) {
-  return `${getExtraPath(filePath)}.bak${backupIndex}`;
-}
-
 function serializeExtraEntries(entries: LexEntry[]) {
   return entries
     .map((entry) => [escapeRawField(entry.text), escapeRawField(entry.pinyin), String(entry.index)].join('/'))
@@ -441,46 +428,6 @@ function getOriginLex(filePath: string) {
   return parseLexBuffer(originPath, fs.readFileSync(originPath));
 }
 
-export function listLexBackups(filePath: string): LexBackupInfo[] {
-  return Array.from({ length: BACKUP_COUNT }, (_, index) => {
-    const backupPath = getBackupPath(filePath, index);
-    if (!fs.existsSync(backupPath)) {
-      return {
-        index,
-        path: toWindowsDisplayPath(backupPath),
-        exists: false,
-        updatedAt: null,
-      };
-    }
-
-    const stats = fs.statSync(backupPath);
-    return {
-      index,
-      path: toWindowsDisplayPath(backupPath),
-      exists: true,
-      updatedAt: stats.mtime.toISOString(),
-    };
-  });
-}
-
-export function rotateLexBackups(filePath: string) {
-  const extraPath = getExtraPath(filePath);
-
-  for (let index = BACKUP_COUNT - 1; index >= 1; index -= 1) {
-    const nextPath = getBackupPath(filePath, index);
-    const previousPath = getBackupPath(filePath, index - 1);
-    if (!fs.existsSync(previousPath)) {
-      continue;
-    }
-
-    fs.copyFileSync(previousPath, nextPath);
-  }
-
-  if (fs.existsSync(extraPath)) {
-    fs.copyFileSync(extraPath, getBackupPath(filePath, 0));
-  }
-}
-
 export function sanitizeLexEntries(entries: LexEntry[]) {
   return entries.map((entry, index) => {
     const text = entry.text.trim();
@@ -578,7 +525,6 @@ export function loadLexFile(filePath: string): LoadedLexFile {
     count: currentLex.count,
     exportTime: currentLex.exportTime,
     recordStart: currentLex.recordStart,
-    backups: listLexBackups(filePath),
     entries: extraEntries,
   };
 }
@@ -589,34 +535,7 @@ export function saveLexFile(filePath: string, entries: LexEntry[]) {
   const nextEntries = sanitizeLexEntries(entries).map((entry) => ({ ...entry, rawHeaderBase64: '' }));
   const mergedEntries = mergeOriginAndExtraEntries(originLex.entries.map(toSerializedEntry), nextEntries);
 
-  rotateLexBackups(filePath);
   writeExtraEntries(filePath, nextEntries);
-  fs.writeFileSync(filePath, buildLexBuffer(mergedEntries, previousFile));
-  return loadLexFile(filePath);
-}
-
-export function restoreLexBackup(filePath: string, backupIndex: number) {
-  if (!Number.isInteger(backupIndex) || backupIndex < 0 || backupIndex >= BACKUP_COUNT) {
-    throw new Error(`Backup index must be between 0 and ${BACKUP_COUNT - 1}`);
-  }
-
-  const backupPath = getBackupPath(filePath, backupIndex);
-  if (!fs.existsSync(backupPath)) {
-    throw new Error(`Backup ${backupIndex} does not exist`);
-  }
-
-  const backupContent = fs.readFileSync(backupPath, 'utf8');
-  const originLex = getOriginLex(filePath);
-  const previousFile = fs.existsSync(filePath) ? parseLexBuffer(filePath, fs.readFileSync(filePath)) : originLex;
-  rotateLexBackups(filePath);
-
-  fs.writeFileSync(getExtraPath(filePath), backupContent, 'utf8');
-
-  const restoredExtraEntries = sanitizeLexEntries(parseExtraEntries(backupContent)).map((entry) => ({
-    ...entry,
-    rawHeaderBase64: '',
-  }));
-  const mergedEntries = mergeOriginAndExtraEntries(originLex.entries.map(toSerializedEntry), restoredExtraEntries);
   fs.writeFileSync(filePath, buildLexBuffer(mergedEntries, previousFile));
   return loadLexFile(filePath);
 }
