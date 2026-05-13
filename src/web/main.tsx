@@ -3,6 +3,10 @@ import { KTFor, computed, ref } from 'kt.js';
 
 import './style.css';
 
+const ENTRY_ROW_HEIGHT = 54;
+const ENTRY_OVERSCAN = 8;
+const DEFAULT_VIEWPORT_HEIGHT = 560;
+
 type AlertSeverity = 'error' | 'success' | 'warning';
 
 interface AlertState {
@@ -43,6 +47,11 @@ interface LexDirectoryScanResult {
   selectedFileName: string | null;
 }
 
+interface RawParseResult {
+  entries: LexEntry[];
+  error: string | null;
+}
+
 const directoryInput = ref('');
 const resolvedDirectory = ref('');
 const selectedFileName = ref('');
@@ -58,6 +67,12 @@ const alertState = ref<AlertState | null>(null);
 const exportTime = ref<number | null>(null);
 const recordStart = ref<number | null>(null);
 const importFileInput = ref<HTMLInputElement>();
+const entryViewport = ref<HTMLDivElement>();
+const viewportScrollTop = ref(0);
+const viewportHeight = ref(DEFAULT_VIEWPORT_HEIGHT);
+const editorMode = ref<'normal' | 'raw'>('normal');
+const rawEditorText = ref('');
+const rawSourceEntries = ref<LexEntry[]>([]);
 
 const busy = computed(() => loading.value || saving.value, [loading, saving]);
 const fileOptions = computed(
@@ -65,12 +80,63 @@ const fileOptions = computed(
   [lexFiles],
 );
 const hasActiveFile = computed(() => loadedFilePath.value !== '', [loadedFilePath]);
+const hasNoActiveFile = computed(() => !hasActiveFile.value, [hasActiveFile]);
+const isNormalMode = computed(() => editorMode.value === 'normal', [editorMode]);
+const isRawMode = computed(() => editorMode.value === 'raw', [editorMode]);
+const showNormalEditor = computed(() => hasActiveFile.value && isNormalMode.value, [hasActiveFile, isNormalMode]);
+const showRawEditor = computed(() => hasActiveFile.value && isRawMode.value, [hasActiveFile, isRawMode]);
 const progressClassName = computed(() => `progress-wrap ${busy.value ? '' : 'is-hidden'}`, [busy]);
 const activeEntryCount = computed(() => entries.value.length, [entries]);
 const entryLabel = computed(
   () => `${activeEntryCount.value} ${activeEntryCount.value === 1 ? 'entry' : 'entries'}`,
   [activeEntryCount],
 );
+const visibleRowCapacity = computed(
+  () => Math.ceil(viewportHeight.value / ENTRY_ROW_HEIGHT) + ENTRY_OVERSCAN * 2,
+  [viewportHeight],
+);
+const visibleStartIndex = computed(
+  () => Math.max(0, Math.floor(viewportScrollTop.value / ENTRY_ROW_HEIGHT) - ENTRY_OVERSCAN),
+  [viewportScrollTop],
+);
+const visibleEndIndex = computed(
+  () => Math.min(entries.value.length, visibleStartIndex.value + visibleRowCapacity.value),
+  [entries, visibleStartIndex, visibleRowCapacity],
+);
+const virtualRows = computed(
+  () =>
+    entries.value.slice(visibleStartIndex.value, visibleEndIndex.value).map((entry, offset) => ({
+      entry,
+      index: visibleStartIndex.value + offset,
+    })),
+  [entries, visibleStartIndex, visibleEndIndex],
+);
+const topSpacerHeight = computed(() => visibleStartIndex.value * ENTRY_ROW_HEIGHT, [visibleStartIndex]);
+const bottomSpacerHeight = computed(
+  () => Math.max(0, (entries.value.length - visibleEndIndex.value) * ENTRY_ROW_HEIGHT),
+  [entries, visibleEndIndex],
+);
+const virtualSummaryText = computed(() => {
+  const visibleCount = Math.max(0, visibleEndIndex.value - visibleStartIndex.value);
+  return `当前渲染 ${visibleCount} 行，窗口起点 ${visibleStartIndex.value + 1}`;
+}, [visibleEndIndex, visibleStartIndex]);
+
+function syncViewportHeight() {
+  viewportHeight.value = entryViewport.value?.clientHeight ?? DEFAULT_VIEWPORT_HEIGHT;
+}
+
+function resetVirtualViewport() {
+  viewportScrollTop.value = 0;
+  if (entryViewport.value) {
+    entryViewport.value.scrollTop = 0;
+  }
+  syncViewportHeight();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('resize', syncViewportHeight);
+  window.setTimeout(syncViewportHeight, 0);
+}
 
 function extractErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -83,6 +149,108 @@ function extractErrorMessage(error: unknown) {
 function showAlert(severity: AlertSeverity, text: string) {
   alertState.value = { severity, text };
 }
+
+function escapeRawField(value: string) {
+  return value.replaceAll('\\', '\\\\').replaceAll('/', '\\/');
+}
+
+function splitRawLine(line: string) {
+  const parts: string[] = [];
+  let current = '';
+  let escaped = false;
+
+  for (const char of line) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '/') {
+      parts.push(current);
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (escaped) {
+    current += '\\';
+  }
+
+  parts.push(current);
+  return parts;
+}
+
+function serializeEntriesToRaw(sourceEntries: LexEntry[]) {
+  return sourceEntries
+    .map((entry) => [escapeRawField(entry.text), escapeRawField(entry.pinyin), String(entry.index)].join('/'))
+    .join('\n');
+}
+
+function parseRawEntries(rawText: string, sourceEntries: LexEntry[]): RawParseResult {
+  const nextEntries: LexEntry[] = [];
+  const templateHeader = sourceEntries[0]?.rawHeaderBase64 ?? entries.value[0]?.rawHeaderBase64 ?? '';
+  const lines = rawText.split(/\r?\n/u);
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    if (line.trim() === '') {
+      continue;
+    }
+
+    const fields = splitRawLine(line);
+    if (fields.length < 3 || fields.length > 4) {
+      return {
+        entries: sourceEntries,
+        error: `第 ${lineIndex + 1} 行格式错误，应为 词条/拼音/排位，可选第 4 项为附加属性。`,
+      };
+    }
+
+    const indexValue = Number(fields[2]);
+    if (!Number.isInteger(indexValue) || indexValue < 1 || indexValue > 9) {
+      return {
+        entries: sourceEntries,
+        error: `第 ${lineIndex + 1} 行的排位必须是 1 到 9 之间的整数。`,
+      };
+    }
+
+    const sourceEntry = sourceEntries[nextEntries.length];
+    nextEntries.push({
+      id: sourceEntry?.id ?? crypto.randomUUID(),
+      text: fields[0],
+      pinyin: fields[1],
+      index: indexValue,
+      rawHeaderBase64: fields[3] ?? sourceEntry?.rawHeaderBase64 ?? templateHeader,
+    });
+  }
+
+  return {
+    entries: nextEntries,
+    error: null,
+  };
+}
+
+const rawValidation = computed(
+  () => parseRawEntries(rawEditorText.value, rawSourceEntries.value),
+  [rawEditorText, rawSourceEntries],
+);
+const rawError = computed(() => rawValidation.value.error ?? '', [rawValidation]);
+const canApplyRawChanges = computed(() => rawValidation.value.error === null, [rawValidation]);
+const rawStatusClassName = computed(
+  () => (rawValidation.value.error ? 'raw-status raw-status-error' : 'raw-status raw-status-ready'),
+  [rawValidation],
+);
+const rawStatusText = computed(
+  () => rawValidation.value.error ?? `当前 raw 草稿可解析为 ${rawValidation.value.entries.length} 条词条。`,
+  [rawValidation],
+);
 
 function formatTimestamp(timestamp: number | null) {
   if (!timestamp) {
@@ -127,6 +295,10 @@ function applyLoadedDocument(document: LoadedLexFile) {
   recordStart.value = document.recordStart;
   entries.value = document.entries;
   backups.value = document.backups;
+  editorMode.value = 'normal';
+  rawEditorText.value = '';
+  rawSourceEntries.value = [];
+  resetVirtualViewport();
 
   if (!lexFiles.value.includes(document.fileName)) {
     lexFiles.value = [...lexFiles.value, document.fileName].sort((left, right) =>
@@ -178,6 +350,9 @@ async function scanDirectory() {
       backups.value = [];
       exportTime.value = null;
       recordStart.value = null;
+      editorMode.value = 'normal';
+      rawEditorText.value = '';
+      rawSourceEntries.value = [];
       showAlert('warning', '该目录下没有发现 .lex 文件。');
       return;
     }
@@ -193,6 +368,11 @@ async function scanDirectory() {
 async function saveEntries() {
   if (!selectedFileName.value) {
     showAlert('warning', '请先加载一个 .lex 文件。');
+    return;
+  }
+
+  if (editorMode.value === 'raw') {
+    showAlert('warning', '请先应用 raw 修改，或放弃 raw 草稿后再保存。');
     return;
   }
 
@@ -271,6 +451,7 @@ function addEntry() {
     index: 1,
     rawHeaderBase64: entries.value[0]?.rawHeaderBase64 ?? '',
   });
+  syncViewportHeight();
 }
 
 function removeEntry(index: number) {
@@ -302,6 +483,43 @@ function updateIndex(index: number, value: string) {
   entries.draft[index].index = Number.isFinite(numericValue) ? Math.max(1, Math.min(9, Math.trunc(numericValue))) : 1;
 }
 
+function enterRawMode() {
+  rawSourceEntries.value = entries.value.map((entry) => ({ ...entry }));
+  rawEditorText.value = serializeEntriesToRaw(entries.value);
+  editorMode.value = 'raw';
+}
+
+function applyRawChanges() {
+  if (rawValidation.value.error) {
+    showAlert('error', rawValidation.value.error);
+    return;
+  }
+
+  entries.value = rawValidation.value.entries.map((entry) => ({ ...entry }));
+  editorMode.value = 'normal';
+  rawEditorText.value = '';
+  rawSourceEntries.value = [];
+  resetVirtualViewport();
+  showAlert('success', 'raw 草稿已应用，已切回表格模式。');
+}
+
+function discardRawChanges() {
+  rawEditorText.value = '';
+  rawSourceEntries.value = [];
+  editorMode.value = 'normal';
+  showAlert('warning', '已放弃 raw 草稿并恢复表格模式。');
+}
+
+function handleViewportScroll(event: Event) {
+  const currentTarget = event.currentTarget as HTMLDivElement | null;
+  if (!currentTarget) {
+    return;
+  }
+
+  viewportScrollTop.value = currentTarget.scrollTop;
+  viewportHeight.value = currentTarget.clientHeight;
+}
+
 async function handleImportFileChange(event: Event) {
   const target = event.currentTarget as HTMLInputElement | null;
   const file = target?.files?.[0];
@@ -330,6 +548,8 @@ const alertView = computed(() => {
 }, [alertState]);
 
 function App() {
+  window.setTimeout(syncViewportHeight, 0);
+
   return (
     <main class="app-shell">
       <section class="hero">
@@ -500,10 +720,10 @@ function App() {
               <div>
                 <h2 class="editor-heading">词条编辑表</h2>
                 <p class="editor-note">
-                  表格中的修改不会立即写回文件，点击“保存当前修改”后才会更新 .lex 并生成新的 bak0。
+                  默认模式使用虚拟列表，只渲染当前视口附近的词条。raw 模式按行编辑，只有格式正确时才能回到表格。
                 </p>
               </div>
-              <div class="button-row">
+              <div k-if={isNormalMode} class="button-row">
                 <Button
                   variant="contained"
                   color="info"
@@ -520,66 +740,105 @@ function App() {
                 >
                   保存全部
                 </Button>
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  disabled={busy.map((value) => value || !hasActiveFile.value)}
+                  on:click={enterRawMode}
+                >
+                  切换 raw
+                </Button>
+              </div>
+
+              <div k-else class="button-row">
+                <Button
+                  variant="contained"
+                  color="primary"
+                  disabled={canApplyRawChanges.map((value) => !value)}
+                  on:click={applyRawChanges}
+                >
+                  返回表格
+                </Button>
+                <Button variant="outlined" color="warning" on:click={discardRawChanges}>
+                  放弃修改
+                </Button>
               </div>
             </div>
 
-            <div k-if={hasActiveFile} class="table-shell">
-              <table class="entry-table">
-                <thead>
-                  <tr>
-                    <th>词条</th>
-                    <th>拼音 / 代码</th>
-                    <th>排位</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <KTFor
-                    list={entries}
-                    key={(entry) => entry.id}
-                    map={(entry, index) => (
-                      <tr>
-                        <td>
-                          <input
-                            class="entry-input"
-                            value={entry.text}
-                            placeholder="词条文本"
-                            on:input={(event) => updateText(index, (event.currentTarget as HTMLInputElement).value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            class="entry-input"
-                            value={entry.pinyin}
-                            placeholder="任意字符串"
-                            on:input={(event) => updatePinyin(index, (event.currentTarget as HTMLInputElement).value)}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            class="entry-input entry-index"
-                            type="number"
-                            min="1"
-                            max="9"
-                            value={String(entry.index)}
-                            on:input={(event) => updateIndex(index, (event.currentTarget as HTMLInputElement).value)}
-                          />
-                        </td>
-                        <td>
-                          <div class="entry-actions">
-                            <Button variant="text" color="error" on:click={() => removeEntry(index)}>
-                              删除
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  ></KTFor>
-                </tbody>
-              </table>
+            <div k-if={showNormalEditor} class="virtual-table-shell">
+              <div class="entry-grid entry-grid-head">
+                <div>词条</div>
+                <div>拼音 / 代码</div>
+                <div>排位</div>
+                <div>操作</div>
+              </div>
+              <div ref={entryViewport} class="virtual-list-viewport" on:scroll={handleViewportScroll}>
+                <div class="virtual-spacer" style={topSpacerHeight.map((value) => `height:${value}px`)}></div>
+                <KTFor
+                  list={virtualRows}
+                  key={(item) => item.entry.id}
+                  map={(item) => (
+                    <div class="entry-grid entry-row">
+                      <div>
+                        <input
+                          class="entry-input"
+                          value={item.entry.text}
+                          placeholder="词条文本"
+                          on:input={(event) => updateText(item.index, (event.currentTarget as HTMLInputElement).value)}
+                        />
+                      </div>
+                      <div>
+                        <input
+                          class="entry-input"
+                          value={item.entry.pinyin}
+                          placeholder="任意字符串"
+                          on:input={(event) =>
+                            updatePinyin(item.index, (event.currentTarget as HTMLInputElement).value)
+                          }
+                        />
+                      </div>
+                      <div>
+                        <input
+                          class="entry-input entry-index"
+                          type="number"
+                          min="1"
+                          max="9"
+                          value={String(item.entry.index)}
+                          on:input={(event) => updateIndex(item.index, (event.currentTarget as HTMLInputElement).value)}
+                        />
+                      </div>
+                      <div class="entry-actions">
+                        <Button variant="text" color="error" on:click={() => removeEntry(item.index)}>
+                          删除
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                ></KTFor>
+                <div class="virtual-spacer" style={bottomSpacerHeight.map((value) => `height:${value}px`)}></div>
+              </div>
+              <p class="fine-print virtual-summary">{virtualSummaryText}</p>
             </div>
 
-            <div k-else class="empty-state">
+            <div k-if={showRawEditor} class="raw-editor-shell">
+              <p class="raw-helper">
+                每行格式为 词条/拼音/排位。若字段中需要包含 / 或 \\，请写成 \/ 与 \\\\。可选第 4 段为附加属性值。
+              </p>
+              <div class={rawStatusClassName}>{rawStatusText}</div>
+              <textarea
+                class="raw-editor"
+                value={rawEditorText}
+                placeholder="例如：自定义词/zi ding yi ci/1"
+                on:input={(event) => {
+                  rawEditorText.value = (event.currentTarget as HTMLTextAreaElement).value;
+                }}
+              ></textarea>
+              <p k-if={rawError} class="fine-print raw-warning">
+                {rawError}
+              </p>
+            </div>
+
+            <div k-if={hasNoActiveFile} class="empty-state">
               <div>
                 <div class="empty-illustration"></div>
                 <h3>先加载一个词库</h3>
