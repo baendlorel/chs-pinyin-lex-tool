@@ -1,12 +1,15 @@
 {
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
     "target": "ESNext",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["node", "vite/client"],
     "jsx": "react-jsx",
     "jsxImportSource": "kt.js",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
     "plugins": [{ "name": "@ktjs/ts-plugin" }]
   },
   "include": ["src/**/*"]

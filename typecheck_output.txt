@@ -1,0 +1,4 @@
+
+> @ typecheck /home/aldia/projects/mine/chs-pinyin-lex-tool
+> tsc --noEmit && tsc -p tsconfig.server.json --noEmit
+

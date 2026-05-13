@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext"],
+    "types": ["node"],
+    "noEmit": false,
+    "rootDir": "src/server",
+    "outDir": "dist/server"
+  },
+  "include": ["src/server/**/*.ts"],
+  "exclude": ["src/server/**/*.test.ts"]
+}
