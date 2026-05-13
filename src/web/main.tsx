@@ -1,5 +1,5 @@
-import { Alert, Button, Dialog, LinearProgress, Select, TextField } from '@ktjs/mui';
-import { Description, FolderOpen, Refresh, Restore, Save, Search, UploadFile } from '@ktjs/mui-icon';
+import { Button, Dialog, LinearProgress, Select, TextField } from '@ktjs/mui';
+import { FolderOpen, Refresh, Restore, Save, Search, UploadFile } from '@ktjs/mui-icon';
 import { KTFor, computed, ref } from 'kt.js';
 
 import './style.css';
@@ -52,7 +52,6 @@ interface RawParseResult {
 }
 
 const directoryInput = ref('');
-const resolvedDirectory = ref('');
 const selectedFileName = ref('');
 const loadedFilePath = ref('');
 const entries = ref<LexEntry[]>([]);
@@ -68,6 +67,12 @@ const recordStart = ref<number | null>(null);
 const importFileInput = ref<HTMLInputElement>();
 const rawEditorText = ref('');
 const rawSourceEntries = ref<LexEntry[]>([]);
+const searchQuery = ref('');
+const searchCursor = ref(-1);
+const searchLine = ref<number | null>(null);
+const searchPerformed = ref(false);
+const lastSearchQuery = ref('');
+const rawEditorSurface = ref<HTMLDivElement>();
 
 const busy = computed(() => loading.value || saving.value, [loading, saving]);
 const fileOptions = computed(
@@ -76,7 +81,12 @@ const fileOptions = computed(
 );
 const hasActiveFile = computed(() => loadedFilePath.value !== '', [loadedFilePath]);
 const hasNoActiveFile = computed(() => !hasActiveFile.value, [hasActiveFile]);
+const hasSearchQuery = computed(() => searchQuery.value.trim() !== '', [searchQuery]);
 const progressClassName = computed(() => `progress-wrap ${busy.value ? '' : 'is-hidden'}`, [busy]);
+const searchButtonDisabled = computed(
+  () => busy.value || !hasActiveFile.value || !hasSearchQuery.value,
+  [busy, hasActiveFile, hasSearchQuery],
+);
 
 function extractErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -197,15 +207,51 @@ const rawValidation = computed(
 );
 const activeEntryCount = computed(() => rawValidation.value.entries.length, [rawValidation]);
 const entryLabel = computed(() => `${activeEntryCount.value} 条`, [activeEntryCount]);
-const rawError = computed(() => rawValidation.value.error ?? '', [rawValidation]);
-const rawStatusClassName = computed(
-  () => (rawValidation.value.error ? 'raw-status raw-status-error' : 'raw-status raw-status-ready'),
-  [rawValidation],
-);
-const rawStatusText = computed(
-  () => rawValidation.value.error ?? `当前 raw 内容可解析为 ${rawValidation.value.entries.length} 条词条。`,
-  [rawValidation],
-);
+const searchStatusText = computed(() => {
+  const keyword = searchQuery.value.trim();
+
+  if (!keyword || !searchPerformed.value) {
+    return '';
+  }
+
+  if (searchLine.value === null) {
+    return `未找到 ${keyword}`;
+  }
+
+  return `搜索 第 ${searchLine.value} 行`;
+}, [searchLine, searchPerformed, searchQuery]);
+const statusBarNoticeText = computed(() => {
+  const current = alertState.value;
+  if (current) {
+    return current.text;
+  }
+
+  if (rawValidation.value.error) {
+    return rawValidation.value.error;
+  }
+
+  if (saving.value) {
+    return '正在保存...';
+  }
+
+  if (loading.value) {
+    return '正在处理...';
+  }
+
+  return hasActiveFile.value ? '就绪' : '等待打开文件';
+}, [alertState, hasActiveFile, loading, rawValidation, saving]);
+const statusBarNoticeClassName = computed(() => {
+  const current = alertState.value;
+  if (current) {
+    return `status-bar-item status-bar-notice is-${current.severity}`;
+  }
+
+  if (rawValidation.value.error) {
+    return 'status-bar-item status-bar-notice is-warning';
+  }
+
+  return 'status-bar-item status-bar-notice';
+}, [alertState, rawValidation]);
 
 function formatTimestamp(timestamp: number | null) {
   if (!timestamp) {
@@ -213,14 +259,6 @@ function formatTimestamp(timestamp: number | null) {
   }
 
   return new Date(timestamp * 1000).toLocaleString('zh-CN');
-}
-
-function formatBackupTime(value: string | null) {
-  if (!value) {
-    return '暂不可用';
-  }
-
-  return new Date(value).toLocaleString('zh-CN');
 }
 
 async function requestJson<T>(input: string, body?: unknown) {
@@ -244,7 +282,6 @@ async function requestJson<T>(input: string, body?: unknown) {
 
 function applyLoadedDocument(document: LoadedLexFile) {
   directoryInput.value = document.filePath;
-  resolvedDirectory.value = document.directoryPath;
   loadedFilePath.value = document.filePath;
   selectedFileName.value = document.fileName;
   exportTime.value = document.exportTime;
@@ -253,6 +290,11 @@ function applyLoadedDocument(document: LoadedLexFile) {
   backups.value = document.backups;
   rawSourceEntries.value = document.entries.map((entry) => ({ ...entry }));
   rawEditorText.value = serializeEntriesToRaw(document.entries);
+  searchQuery.value = '';
+  searchCursor.value = -1;
+  searchLine.value = null;
+  searchPerformed.value = false;
+  lastSearchQuery.value = '';
   persistLastOpenPath(document.filePath);
 
   if (!lexFiles.value.includes(document.fileName)) {
@@ -303,7 +345,6 @@ async function scanDirectory() {
     directoryInput.value = result.selectedFileName
       ? `${result.directoryPath}/${result.selectedFileName}`
       : result.directoryPath;
-    resolvedDirectory.value = result.directoryPath;
     lexFiles.value = result.files;
     selectedFileName.value = result.selectedFileName ?? '';
 
@@ -420,19 +461,6 @@ async function handleImportFileChange(event: Event) {
   }
 }
 
-const alertView = computed(() => {
-  const current = alertState.value;
-  if (!current) {
-    return '';
-  }
-
-  return (
-    <Alert severity={current.severity} variant="filled" on:close={() => (alertState.value = null)}>
-      {current.text}
-    </Alert>
-  );
-}, [alertState]);
-
 let autoScanInitialized = false;
 
 function restoreLastOpenPathAndScan() {
@@ -449,6 +477,78 @@ function restoreLastOpenPathAndScan() {
   void scanDirectory();
 }
 
+function getRawEditorTextarea() {
+  return rawEditorSurface.value?.querySelector('textarea') ?? null;
+}
+
+function locateSearchMatch(resetFromStart = false, queryOverride?: string) {
+  const keyword = (queryOverride ?? searchQuery.value).trim();
+
+  if (!keyword) {
+    searchCursor.value = -1;
+    searchLine.value = null;
+    searchPerformed.value = false;
+    lastSearchQuery.value = '';
+    return;
+  }
+
+  const content = rawEditorText.value;
+  const shouldReset = resetFromStart || lastSearchQuery.value !== keyword || searchCursor.value < 0;
+  let matchIndex = content.indexOf(keyword, shouldReset ? 0 : searchCursor.value + 1);
+
+  if (matchIndex === -1 && !shouldReset) {
+    matchIndex = content.indexOf(keyword, 0);
+  }
+
+  searchPerformed.value = true;
+  lastSearchQuery.value = keyword;
+
+  if (matchIndex === -1) {
+    searchCursor.value = -1;
+    searchLine.value = null;
+    return;
+  }
+
+  searchCursor.value = matchIndex;
+  searchLine.value = content.slice(0, matchIndex).split(/\r?\n/u).length;
+
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    const target = getRawEditorTextarea();
+    if (!target) {
+      return;
+    }
+
+    const lineIndex = content.slice(0, matchIndex).split(/\r?\n/u).length - 1;
+    const lineHeight = Number.parseFloat(window.getComputedStyle(target).lineHeight) || 24;
+
+    target.focus();
+    target.setSelectionRange(matchIndex, matchIndex + keyword.length);
+    target.scrollTop = Math.max(lineIndex * lineHeight - target.clientHeight * 0.35, 0);
+  });
+}
+
+function handleSearchInput(value: string) {
+  searchQuery.value = value;
+
+  if (!value.trim()) {
+    searchCursor.value = -1;
+    searchLine.value = null;
+    searchPerformed.value = false;
+    lastSearchQuery.value = '';
+    return;
+  }
+
+  searchCursor.value = -1;
+  searchLine.value = null;
+  searchPerformed.value = false;
+  lastSearchQuery.value = '';
+  locateSearchMatch(true, value);
+}
+
 if (typeof window !== 'undefined' && !autoScanInitialized) {
   autoScanInitialized = true;
   window.setTimeout(() => {
@@ -461,11 +561,12 @@ function App() {
     <main class="app-shell">
       <header class="ribbon-shell">
         <div class="ribbon-topline">
-          <div>
-            {/* <p class="app-kicker">KT.js + MUI</p> */}
-            <h1 class="app-title">Microsoft Pinyin Lex 编辑器</h1>
-          </div>
-          {/* <p class="app-note">启动时会自动恢复上次成功打开的路径并重新扫描。</p> */}
+          <h1 class="app-title">
+            <span class="app-title-main">Microsoft Pinyin Lex 编辑器</span>
+            <span k-if={hasActiveFile} class="app-title-file">
+              {selectedFileName}
+            </span>
+          </h1>
         </div>
 
         <input
@@ -481,7 +582,7 @@ function App() {
             class="toolbar-text-field"
             k-model={directoryInput}
             fullWidth
-            label="Windows 目录或 .lex 文件路径"
+            size="small"
             placeholder="C:\\Users\\Alice\\AppData\\Local\\Microsoft\\InputMethod 或 .lex 文件"
           ></TextField>
 
@@ -489,9 +590,8 @@ function App() {
             class="toolbar-select-field"
             value={selectedFileName}
             options={fileOptions}
-            placeholder="先扫描目录"
+            placeholder="选择 .lex 文件"
             fullWidth
-            label="检测到的 .lex 文件"
             disabled={lexFiles.map((items) => items.length === 0 || busy.value)}
             on:change={(value) => {
               const nextFileName = String(value);
@@ -500,10 +600,35 @@ function App() {
             }}
           ></Select>
 
+          <div class="toolbar-search">
+            <TextField
+              class="toolbar-search-field"
+              k-model={searchQuery}
+              fullWidth
+              size="small"
+              placeholder="搜索词汇"
+              disabled={hasNoActiveFile}
+              on:input={(value) => handleSearchInput(String(value))}
+            ></TextField>
+            <Button
+              class="toolbar-action-button"
+              variant="text"
+              color="primary"
+              size="small"
+              disabled={searchButtonDisabled}
+              startIcon={<Search />}
+              on:click={() => locateSearchMatch()}
+            >
+              下一个
+            </Button>
+          </div>
+
           <div class="toolbar-actions">
             <Button
+              class="toolbar-action-button"
               variant="outlined"
               color="primary"
+              size="small"
               disabled={busy}
               startIcon={<Search />}
               on:click={() => void scanDirectory()}
@@ -512,8 +637,10 @@ function App() {
             </Button>
 
             <Button
+              class="toolbar-action-button"
               variant="outlined"
               color="warning"
+              size="small"
               disabled={busy.map((value) => value || !hasActiveFile.value)}
               startIcon={<Refresh />}
               on:click={() => void loadCurrentFile()}
@@ -522,8 +649,10 @@ function App() {
             </Button>
 
             <Button
+              class="toolbar-action-button"
               variant="outlined"
               color="secondary"
+              size="small"
               disabled={busy.map((value) => value || !hasActiveFile.value)}
               startIcon={<UploadFile />}
               on:click={() => importFileInput.value?.click()}
@@ -532,8 +661,10 @@ function App() {
             </Button>
 
             <Button
+              class="toolbar-action-button"
               variant="contained"
               color="success"
+              size="small"
               disabled={busy.map((value) => value || !hasActiveFile.value)}
               startIcon={<Save />}
               on:click={() => void saveEntries()}
@@ -544,59 +675,41 @@ function App() {
         </div>
 
         <div class="backup-strip">
-          <span class="toolbar-label">恢复备份</span>
           <KTFor
             list={backups}
             key={(backup) => backup.index}
             map={(backup) => (
               <Button
+                class="backup-button"
                 variant="text"
                 color="warning"
+                size="small"
                 disabled={busy.map((value) => value || !backup.exists, [busy, backups])}
                 startIcon={<Restore />}
                 on:click={() => void restoreBackup(backup.index)}
               >
-                <span style="margin-right:5px">备份{backup.index}</span>
-                <small>{backup.exists ? formatBackupTime(backup.updatedAt) : '暂无'}</small>
+                bak{backup.index}
               </Button>
             )}
           ></KTFor>
         </div>
 
-        <div class="status-banner">{alertView}</div>
         <div class={progressClassName}>
           <LinearProgress variant="indeterminate" color="warning"></LinearProgress>
         </div>
       </header>
 
       <section class="editor-frame">
-        <article k-if={hasActiveFile} class="editor-sheet">
-          <header class="document-header">
-            <p class="document-kicker">RAW DOCUMENT</p>
-            <h2 class="document-title">
-              <Description class="document-title-icon" />
-              <span>{selectedFileName}</span>
-            </h2>
-            <p class="document-note">
-              每行格式为 词条/拼音/排位。若字段中需要包含 / 或 \\，请写成 \/ 与 \\\\。可选第 4 段为附加属性值。
-            </p>
-          </header>
-
-          <div class={rawStatusClassName}>{rawStatusText}</div>
-
+        <div k-if={hasActiveFile} class="editor-surface" ref={rawEditorSurface}>
           <TextField
             class="raw-editor-field"
             k-model={rawEditorText}
             multiline
-            rows={26}
+            rows={30}
             fullWidth
             placeholder="例如：自定义词/zi ding yi ci/1"
           ></TextField>
-
-          <p k-if={rawError} class="document-warning">
-            {rawError}
-          </p>
-        </article>
+        </div>
 
         <div k-if={hasNoActiveFile} class="empty-state">
           <div class="empty-card">
@@ -614,8 +727,20 @@ function App() {
 
       <footer class="status-bar" aria-label="document status">
         <div class="status-bar-group status-bar-group-left">
-          <span class="status-bar-item">{selectedFileName.map((value) => value || '未选择文件')}</span>
+          <span
+            class={statusBarNoticeClassName}
+            on:click={() => {
+              if (alertState.value) {
+                alertState.value = null;
+              }
+            }}
+          >
+            {statusBarNoticeText}
+          </span>
           <span class="status-bar-item">{entryLabel}</span>
+          <span k-if={searchStatusText} class="status-bar-item">
+            {searchStatusText}
+          </span>
         </div>
         <div class="status-bar-group status-bar-group-right">
           <span class="status-bar-item">导出 {exportTime.map((value) => formatTimestamp(value))}</span>
