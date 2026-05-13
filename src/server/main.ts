@@ -15,23 +15,19 @@ import {
   scanLexDirectory,
 } from './lex-service.js';
 
-interface DirectoryPayload {
-  directoryPath: string;
+interface PathPayload {
+  filePath: string;
 }
 
-interface FilePayload extends DirectoryPayload {
-  fileName?: string;
-}
-
-interface SavePayload extends FilePayload {
+interface SavePayload extends PathPayload {
   entries: LexEntry[];
 }
 
-interface ImportPayload extends FilePayload {
+interface ImportPayload extends PathPayload {
   content: string;
 }
 
-interface RestorePayload extends FilePayload {
+interface RestorePayload extends PathPayload {
   backupIndex: number;
 }
 
@@ -47,15 +43,20 @@ function assertNonEmptyString(value: unknown, fieldName: string) {
   return value.trim();
 }
 
-function resolveLexFilePath(payload: FilePayload) {
-  const directoryPath = assertNonEmptyString(payload.directoryPath, 'directoryPath');
-  const scanResult = scanLexDirectory(directoryPath);
-  const fileName = payload.fileName?.trim() || scanResult.selectedFileName;
-  if (!fileName) {
+function resolveLexFilePath(payload: PathPayload) {
+  const filePath = normalizeWindowsPath(assertNonEmptyString(payload.filePath, 'filePath'));
+  const stats = fs.statSync(filePath);
+
+  if (stats.isFile()) {
+    return filePath;
+  }
+
+  const scanResult = scanLexDirectory(filePath);
+  if (!scanResult.selectedFilePath) {
     throw new Error('No .lex file was found in the selected directory');
   }
 
-  return path.join(scanResult.directoryPath, fileName);
+  return normalizeWindowsPath(scanResult.selectedFilePath);
 }
 
 function createServer() {
@@ -76,13 +77,13 @@ function createServer() {
     };
   });
 
-  app.post<{ Body: DirectoryPayload }>('/api/lex/scan', async (request) => {
-    const directoryPath = assertNonEmptyString(request.body?.directoryPath, 'directoryPath');
-    return scanLexDirectory(directoryPath);
+  app.post<{ Body: PathPayload }>('/api/lex/scan', async (request) => {
+    const filePath = assertNonEmptyString(request.body?.filePath, 'filePath');
+    return scanLexDirectory(filePath);
   });
 
-  app.post<{ Body: FilePayload }>('/api/lex/load', async (request) => {
-    const filePath = resolveLexFilePath(request.body ?? { directoryPath: '' });
+  app.post<{ Body: PathPayload }>('/api/lex/load', async (request) => {
+    const filePath = resolveLexFilePath(request.body ?? { filePath: '' });
     return loadLexFile(filePath);
   });
 
@@ -99,7 +100,7 @@ function createServer() {
   app.post<{ Body: ImportPayload }>('/api/lex/import', async (request) => {
     const payload = request.body;
     const content = assertNonEmptyString(payload?.content, 'content');
-    const filePath = resolveLexFilePath(payload ?? { directoryPath: '' });
+    const filePath = resolveLexFilePath(payload ?? { filePath: '' });
     const loaded = loadLexFile(filePath);
     const mergedEntries = parseImportText(content, loaded.entries);
     return saveLexFile(filePath, mergedEntries);
@@ -111,7 +112,7 @@ function createServer() {
       throw new Error('backupIndex must be an integer');
     }
 
-    const filePath = resolveLexFilePath(payload ?? { directoryPath: '' });
+    const filePath = resolveLexFilePath(payload ?? { filePath: '' });
     return restoreLexBackup(filePath, payload.backupIndex);
   });
 

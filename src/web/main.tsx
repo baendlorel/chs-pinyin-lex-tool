@@ -43,7 +43,7 @@ interface LexDirectoryScanResult {
   inputPath: string;
   directoryPath: string;
   files: string[];
-  selectedFileName: string | null;
+  selectedFilePath: string | null;
 }
 
 interface RawParseResult {
@@ -54,7 +54,6 @@ interface RawParseResult {
 const lexPath = ref('');
 const lexPathDraft = ref('');
 const lexPathDialogOpen = ref(false);
-const selectedFileName = ref('');
 const loadedFilePath = ref('');
 const entries = ref<LexEntry[]>([]);
 const backups = ref<LexBackupInfo[]>([]);
@@ -70,6 +69,15 @@ const busy = computed(() => loading.value || saving.value, [loading, saving]);
 const hasActiveFile = computed(() => loadedFilePath.value !== '', [loadedFilePath]);
 const hasNoActiveFile = loadedFilePath.is('');
 const progressClassName = computed(() => `progress-wrap ${busy.value ? '' : 'is-hidden'}`, [busy]);
+const activeFileName = computed(() => {
+  const currentPath = loadedFilePath.value.trim();
+  if (!currentPath) {
+    return '';
+  }
+
+  const parts = currentPath.split(/[\\/]/u);
+  return parts[parts.length - 1] ?? '';
+}, [loadedFilePath]);
 
 function extractErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -253,7 +261,6 @@ async function requestJson<T>(input: string, body?: unknown) {
 function applyLoadedDocument(document: LoadedLexFile) {
   lexPath.value = document.filePath;
   loadedFilePath.value = document.filePath;
-  selectedFileName.value = document.fileName;
   exportTime.value = document.exportTime;
   recordStart.value = document.recordStart;
   entries.value = document.entries;
@@ -263,8 +270,8 @@ function applyLoadedDocument(document: LoadedLexFile) {
   persistLastOpenPath(document.filePath);
 }
 
-async function loadCurrentFile(fileName = selectedFileName.value, manageLoading = true) {
-  if (!fileName) {
+async function loadCurrentFile(filePath = lexPath.value, manageLoading = true) {
+  if (!filePath.trim()) {
     showAlert('warning', '请先选择一个 .lex 文件。');
     return;
   }
@@ -275,8 +282,7 @@ async function loadCurrentFile(fileName = selectedFileName.value, manageLoading 
 
   try {
     const document = await requestJson<LoadedLexFile>('/api/lex/load', {
-      directoryPath: lexPath.value,
-      fileName,
+      filePath,
     });
     applyLoadedDocument(document);
     showAlert('success', `已加载 ${document.fileName}。`);
@@ -299,19 +305,15 @@ async function scanDirectory() {
 
   try {
     const result = await requestJson<LexDirectoryScanResult>('/api/lex/scan', {
-      directoryPath: lexPath.value,
+      filePath: lexPath.value,
     });
-    lexPath.value = result.selectedFileName
-      ? `${result.directoryPath}/${result.selectedFileName}`
-      : result.directoryPath;
-    selectedFileName.value = result.selectedFileName ?? '';
+    lexPath.value = result.selectedFilePath ?? result.directoryPath;
 
-    if (!result.selectedFileName) {
+    if (!result.selectedFilePath) {
       persistLastOpenPath(result.directoryPath);
       loadedFilePath.value = '';
       entries.value = [];
       backups.value = [];
-      selectedFileName.value = '';
       exportTime.value = null;
       recordStart.value = null;
       rawEditorText.value = '';
@@ -320,7 +322,7 @@ async function scanDirectory() {
       return;
     }
 
-    await loadCurrentFile(result.selectedFileName, false);
+    await loadCurrentFile(result.selectedFilePath, false);
   } catch (error) {
     showAlert('error', extractErrorMessage(error));
   } finally {
@@ -329,7 +331,7 @@ async function scanDirectory() {
 }
 
 async function saveEntries() {
-  if (!selectedFileName.value) {
+  if (!loadedFilePath.value) {
     showAlert('warning', '请先加载一个 .lex 文件。');
     return;
   }
@@ -343,8 +345,7 @@ async function saveEntries() {
 
   try {
     const document = await requestJson<LoadedLexFile>('/api/lex/save', {
-      directoryPath: lexPath.value,
-      fileName: selectedFileName.value,
+      filePath: loadedFilePath.value,
       entries: rawValidation.value.entries,
     });
     applyLoadedDocument(document);
@@ -357,7 +358,7 @@ async function saveEntries() {
 }
 
 async function restoreBackup(backupIndex: number) {
-  if (!selectedFileName.value) {
+  if (!loadedFilePath.value) {
     return;
   }
 
@@ -369,8 +370,7 @@ async function restoreBackup(backupIndex: number) {
 
   try {
     const document = await requestJson<LoadedLexFile>('/api/lex/restore', {
-      directoryPath: lexPath.value,
-      fileName: selectedFileName.value,
+      filePath: loadedFilePath.value,
       backupIndex,
     });
     applyLoadedDocument(document);
@@ -434,7 +434,7 @@ function App() {
           <h1 class="app-title">
             <span class="app-title-main">Microsoft Pinyin Lex 编辑器</span>
             <span k-if={hasActiveFile} class="app-title-file">
-              {selectedFileName}
+              {activeFileName}
             </span>
           </h1>
         </div>

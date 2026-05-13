@@ -55,7 +55,36 @@ export interface LexDirectoryScanResult {
   inputPath: string;
   directoryPath: string;
   files: string[];
-  selectedFileName: string | null;
+  selectedFilePath: string | null;
+}
+
+function toWindowsDisplayPath(sourcePath: string) {
+  const trimmedPath = sourcePath.trim();
+  if (!trimmedPath) {
+    return '';
+  }
+
+  if (/^[a-zA-Z]:[\\/]/.test(trimmedPath)) {
+    return path.win32.normalize(trimmedPath);
+  }
+
+  if (trimmedPath.startsWith('\\')) {
+    return path.win32.normalize(trimmedPath);
+  }
+
+  const normalizedPath = path.normalize(trimmedPath);
+  const wslDriveMatch = normalizedPath.match(/^\/mnt\/([a-zA-Z])(\/.*)?$/);
+  if (wslDriveMatch) {
+    const [, driveLetter, rest = ''] = wslDriveMatch;
+    const suffix = rest.replace(/\//g, '\\');
+    return `${driveLetter.toUpperCase()}:\\${suffix.replace(/^\\/, '')}`;
+  }
+
+  if (normalizedPath.startsWith('//')) {
+    return normalizedPath.replace(/\//g, '\\');
+  }
+
+  return normalizedPath;
 }
 
 function createEntryId(rawHeader: Buffer, pinyin: string, index: number, text: string) {
@@ -256,7 +285,7 @@ export function listLexBackups(filePath: string): LexBackupInfo[] {
     if (!fs.existsSync(backupPath)) {
       return {
         index,
-        path: backupPath,
+        path: toWindowsDisplayPath(backupPath),
         exists: false,
         updatedAt: null,
       };
@@ -265,7 +294,7 @@ export function listLexBackups(filePath: string): LexBackupInfo[] {
     const stats = fs.statSync(backupPath);
     return {
       index,
-      path: backupPath,
+      path: toWindowsDisplayPath(backupPath),
       exists: true,
       updatedAt: stats.mtime.toISOString(),
     };
@@ -359,10 +388,17 @@ export function scanLexDirectory(inputPath: string): LexDirectoryScanResult {
     .sort((left, right) => left.localeCompare(right, 'zh-Hans-CN'));
 
   return {
-    inputPath,
-    directoryPath,
+    inputPath: toWindowsDisplayPath(inputPath),
+    directoryPath: toWindowsDisplayPath(directoryPath),
     files,
-    selectedFileName: selectedFileName ?? files[0] ?? null,
+    selectedFilePath:
+      toWindowsDisplayPath(
+        selectedFileName
+          ? path.join(directoryPath, selectedFileName)
+          : files[0]
+            ? path.join(directoryPath, files[0])
+            : '',
+      ) || null,
   };
 }
 
@@ -370,9 +406,9 @@ export function loadLexFile(filePath: string): LoadedLexFile {
   const parsedFile = parseLexBuffer(filePath, fs.readFileSync(filePath));
 
   return {
-    filePath,
+    filePath: toWindowsDisplayPath(filePath),
     fileName: path.basename(filePath),
-    directoryPath: path.dirname(filePath),
+    directoryPath: toWindowsDisplayPath(path.dirname(filePath)),
     count: parsedFile.count,
     exportTime: parsedFile.exportTime,
     recordStart: parsedFile.recordStart,

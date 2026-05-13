@@ -89,6 +89,6 @@ describe('lex-service', () => {
 
     const scanResult = scanLexDirectory(directory);
     expect(scanResult.files).toEqual(['ChsPinyinEUDPv1.lex']);
-    expect(scanResult.selectedFileName).toBe('ChsPinyinEUDPv1.lex');
+    expect(scanResult.selectedFilePath).toMatch(/[\\/]ChsPinyinEUDPv1\.lex$/);
   });
 });
